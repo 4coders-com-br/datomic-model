@@ -603,150 +603,7 @@
                 [?r :repo/slug ?slug]]
        db* rules owner slug))
 
-;; ═════════════════════════════════════════════════════════════════════
-;; NAVIGATION — slide anchors, jump-in points, class narration
-;; ═════════════════════════════════════════════════════════════════════
-;; Every deck slide tagged `REPL §n` has a `SLIDE n` anchor further
-;; down (search: SLIDE 24). Under each anchor sits (goto! n): eval it
-;; when you TELEPORT somewhere — it announces where you are in the
-;; class and rebuilds the db, from scratch and in canonical order, to
-;; that slide's exact starting state. Ids in `;; =>` comments
-;; reproduce, and every block runs standalone. Plain top-to-bottom
-;; evaluation never needs goto!.
 
-(declare issue-schema)          ;; defined in §4.4; replayed below
-
-(def parts
-  {1 "PART 1 · The datom — the smallest fact"
-   2 "PART 2 · Query — pattern matching all the way down"
-   3 "PART 3 · Schema is data"
-   4 "PART 4 · One store, seven shapes"
-   5 "PART 5 · Time — columns four and five"
-   6 "PART 6 · Architecture, heuristics, homework"})
-
-(def slide-notes
-  ;; slide → [part title]: what (goto! n) announces.
-  {10 [1 "A database in one expression"]
-   11 [1 "Attributes first: a little schema"]
-   12 [1 "First facts"]
-   13 [1 "Look at the raw datoms"]
-   14 [1 "Lookup refs: identity that travels"]
-   16 [2 "A where-clause is a datom with holes"]
-   17 [2 "Four result shapes (and a trap)"]
-   18 [2 "Flip what you know; joins for free"]
-   19 [2 "Parameterize; call the host mid-query"]
-   20 [2 "Absence is information"]
-   21 [2 "Refs: the owner interview question"]
-   22 [2 "Polymorphism happens at read time"]
-   23 [2 "Forks: self-joins & meaningful absence"]
-   24 [2 "Cardinality-many & the only metric that matters"]
-   25 [2 "The :with trap; negation"]
-   27 [3 "Attributes are entities"]
-   28 [3 "Growth = accretion; composite identity"]
-   29 [3 "Enums are idents"]
-   31 [4 "Sort the same datoms four ways"]
-   32 [4 "Shape 1/7 · AVET = key-value store"]
-   33 [4 "Shape 2/7 · EAVT = relational rows"]
-   34 [4 "Shape 3/7 · AEVT = column store"]
-   35 [4 "Shape 4/7 · documents — write (nested maps in)"]
-   36 [4 "Shape 4/7 · documents — read (pull)"]
-   37 [4 "Shape 4/7 · reverse refs, cascades, fulltext"]
-   38 [4 "Shape 5/7 · VAET = graph database"]
-   39 [4 "The mesh payoff — a recommender in five clauses"]
-   40 [4 "Shapes 6 & 7 · event log · sparse matrix"]
-   43 [5 "\"Update\" is not a primitive"]
-   44 [5 "Surgical writes: retract & CAS"]
-   45 [5 "Transactions are entities — annotate them"]
-   46 [5 "Time-travel APIs"]
-   47 [5 "What-if: a database you can lie to"]
-   48 [5 "Permissions as datom predicates"]
-   53 [6 "Exercises E1–E5 — full class db, over to you"]})
-
-(def replay
-  ;; slide → the WRITES that slide's own block performs. Kept in sync,
-  ;; by hand, with the literal forms in the blocks below. (goto! n)
-  ;; replays every entry strictly BEFORE n, in order, onto a fresh db —
-  ;; that determinism is what makes the `;; =>` ids reproduce.
-  [[11 (fn [] @(d/transact conn user-schema))]
-   [12 (fn [] @(d/transact conn [{:user/name "richhickey"}
-                                 {:user/name "tonsky"}
-                                 {:user/name "pithyless"}]))]
-   [18 (fn [] @(d/transact conn [{:db/id [:user/name "richhickey"]
-                                  :user/email "rich@example.com"}
-                                 {:db/id [:user/name "tonsky"]
-                                  :user/email "tonsky@example.com"}]))]
-   [21 (fn [] @(d/transact conn repo-schema)
-              @(d/transact conn seed-owners)
-              @(d/transact conn seed))]
-   [28 (fn [] @(d/transact conn [{:db/ident       :repo/topics
-                                  :db/valueType   :db.type/string
-                                  :db/cardinality :db.cardinality/many}])
-              @(d/transact conn [{:db/id (repo (db) "tonsky" "datascript")
-                                  :repo/topics #{"database" "datalog"
-                                                 "clojurescript"}}]))]
-   [29 (fn [] @(d/transact conn [{:db/ident :repo.visibility/public}
-                                 {:db/ident :repo.visibility/private}
-                                 {:db/ident       :repo/visibility
-                                  :db/valueType   :db.type/ref
-                                  :db/cardinality :db.cardinality/one}])
-              @(d/transact conn [{:db/id (repo (db) "victor" "datascript")
-                                  :repo/visibility
-                                  :repo.visibility/private}]))]
-   [35 (fn [] @(d/transact conn issue-schema)
-              @(d/transact conn
-                 [{:db/id (repo (db) "tonsky" "datascript")
-                   :repo/issues
-                   [{:issue/title "Support tuple bindings in :find"
-                     :issue/state :issue.state/open
-                     :issue/comments
-                     [{:comment/body   "PR incoming — same trick as Datomic?"
-                       :comment/author [:user/name "pithyless"]}
-                      {:comment/body   "Yes. Keep the API surface identical."
-                       :comment/author [:user/name "tonsky"]}]}]}]))]
-   [40 (fn [] @(d/transact conn [{:db/ident       :user/twitter
-                                  :db/valueType   :db.type/string
-                                  :db/cardinality :db.cardinality/one}])
-              @(d/transact conn [{:db/id [:user/name "tonsky"]
-                                  :user/twitter "@tonsky"}]))]
-   [43 (fn [] (intern 'domain-modeling.repl 'victor [:user/name "victor"])
-              (intern 'domain-modeling.repl 't-before (d/basis-t (db)))
-              @(d/transact conn [{:db/id [:user/name "victor"]
-                                  :user/email "victor@4coders.com.br"}]))]
-   [44 (fn [] @(d/transact conn [[:db/retract [:user/name "victor"]
-                                  :user/stars (repo (db) "clojure" "clojure")]])
-              @(d/transact conn [[:db/cas [:user/name "victor"] :user/email
-                                  "victor@4coders.com.br"
-                                  "v@4coders.com.br"]]))]
-   [45 (fn [] @(d/transact conn [{:db/ident :audit/actor
-                                  :db/valueType :db.type/string
-                                  :db/cardinality :db.cardinality/one}
-                                 {:db/ident :audit/reason
-                                  :db/valueType :db.type/string
-                                  :db/cardinality :db.cardinality/one}])
-              @(d/transact conn [{:db/id "datomic.tx"
-                                  :audit/actor  "bruna"
-                                  :audit/reason "COI import batch #42"}
-                                 {:db/id [:user/name "richhickey"]
-                                  :user/twitter "@richhickey"}]))]])
-
-(defn goto!
-  "Teleport to SLIDE n. Announces where we are in the class, then
-   rebuilds the in-memory db from scratch by replaying every prior
-   slide's writes in canonical order — entity ids and t values in the
-   `;; =>` comments reproduce exactly. Idempotent; back-jumps welcome."
-  [n]
-  (let [[p title] (or (slide-notes n) [nil "(uncharted territory)"])]
-    (fresh!)
-    (doseq [[at thunk] replay :when (< at n)] (thunk))
-    (println)
-    (println "════════════════════════════════════════════════════════════")
-    (println (str "  ▶ SLIDE " n "  ·  " (get parts p "…")))
-    (println (str "  ▶ " title))
-    (println (str "  ▶ db rebuilt: " (count (seq (d/datoms (db) :eavt)))
-                  " datoms · basis-t " (d/basis-t (db))
-                  " · eval forms below, top → bottom"))
-    (println "════════════════════════════════════════════════════════════")
-    [:slide n :ready]))
 
 (comment
 
@@ -1741,6 +1598,9 @@
   ;; Nothing was overwritten. The past is immutable; the present is
   ;; just the fold of the log.
 
+  ;; New t now
+  (d/basis-t (db))
+
 
 
 
@@ -1815,6 +1675,8 @@
      [{:db/ident :audit/actor  :db/valueType :db.type/string
        :db/cardinality :db.cardinality/one}
       {:db/ident :audit/reason :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one}
+      {:db/ident :user/twitter :db/valueType :db.type/string
        :db/cardinality :db.cardinality/one}])
 
   @(d/transact conn
@@ -2053,3 +1915,149 @@
   ;;     you had to change. (Spoiler: the schema map shrinks; the
   ;;     query survives intact.)
   )
+
+
+;; ═════════════════════════════════════════════════════════════════════
+;; NAVIGATION — slide anchors, jump-in points, class narration
+;; ═════════════════════════════════════════════════════════════════════
+;; Every deck slide tagged `REPL §n` has a `SLIDE n` anchor further
+;; down (search: SLIDE 24). Under each anchor sits (goto! n): eval it
+;; when you TELEPORT somewhere — it announces where you are in the
+;; class and rebuilds the db, from scratch and in canonical order, to
+;; that slide's exact starting state. Ids in `;; =>` comments
+;; reproduce, and every block runs standalone. Plain top-to-bottom
+;; evaluation never needs goto!.
+
+(declare issue-schema)          ;; defined in §4.4; replayed below
+
+(def parts
+  {1 "PART 1 · The datom — the smallest fact"
+   2 "PART 2 · Query — pattern matching all the way down"
+   3 "PART 3 · Schema is data"
+   4 "PART 4 · One store, seven shapes"
+   5 "PART 5 · Time — columns four and five"
+   6 "PART 6 · Architecture, heuristics, homework"})
+
+(def slide-notes
+  ;; slide → [part title]: what (goto! n) announces.
+  {10 [1 "A database in one expression"]
+   11 [1 "Attributes first: a little schema"]
+   12 [1 "First facts"]
+   13 [1 "Look at the raw datoms"]
+   14 [1 "Lookup refs: identity that travels"]
+   16 [2 "A where-clause is a datom with holes"]
+   17 [2 "Four result shapes (and a trap)"]
+   18 [2 "Flip what you know; joins for free"]
+   19 [2 "Parameterize; call the host mid-query"]
+   20 [2 "Absence is information"]
+   21 [2 "Refs: the owner interview question"]
+   22 [2 "Polymorphism happens at read time"]
+   23 [2 "Forks: self-joins & meaningful absence"]
+   24 [2 "Cardinality-many & the only metric that matters"]
+   25 [2 "The :with trap; negation"]
+   27 [3 "Attributes are entities"]
+   28 [3 "Growth = accretion; composite identity"]
+   29 [3 "Enums are idents"]
+   31 [4 "Sort the same datoms four ways"]
+   32 [4 "Shape 1/7 · AVET = key-value store"]
+   33 [4 "Shape 2/7 · EAVT = relational rows"]
+   34 [4 "Shape 3/7 · AEVT = column store"]
+   35 [4 "Shape 4/7 · documents — write (nested maps in)"]
+   36 [4 "Shape 4/7 · documents — read (pull)"]
+   37 [4 "Shape 4/7 · reverse refs, cascades, fulltext"]
+   38 [4 "Shape 5/7 · VAET = graph database"]
+   39 [4 "The mesh payoff — a recommender in five clauses"]
+   40 [4 "Shapes 6 & 7 · event log · sparse matrix"]
+   43 [5 "\"Update\" is not a primitive"]
+   44 [5 "Surgical writes: retract & CAS"]
+   45 [5 "Transactions are entities — annotate them"]
+   46 [5 "Time-travel APIs"]
+   47 [5 "What-if: a database you can lie to"]
+   48 [5 "Permissions as datom predicates"]
+   53 [6 "Exercises E1–E5 — full class db, over to you"]})
+
+(def replay
+  ;; slide → the WRITES that slide's own block performs. Kept in sync,
+  ;; by hand, with the literal forms in the blocks below. (goto! n)
+  ;; replays every entry strictly BEFORE n, in order, onto a fresh db —
+  ;; that determinism is what makes the `;; =>` ids reproduce.
+  [[11 (fn [] @(d/transact conn user-schema))]
+   [12 (fn [] @(d/transact conn [{:user/name "richhickey"}
+                                 {:user/name "tonsky"}
+                                 {:user/name "pithyless"}]))]
+   [18 (fn [] @(d/transact conn [{:db/id [:user/name "richhickey"]
+                                  :user/email "rich@example.com"}
+                                 {:db/id [:user/name "tonsky"]
+                                  :user/email "tonsky@example.com"}]))]
+   [21 (fn [] @(d/transact conn repo-schema)
+              @(d/transact conn seed-owners)
+              @(d/transact conn seed))]
+   [28 (fn [] @(d/transact conn [{:db/ident       :repo/topics
+                                  :db/valueType   :db.type/string
+                                  :db/cardinality :db.cardinality/many}])
+              @(d/transact conn [{:db/id (repo (db) "tonsky" "datascript")
+                                  :repo/topics #{"database" "datalog"
+                                                 "clojurescript"}}]))]
+   [29 (fn [] @(d/transact conn [{:db/ident :repo.visibility/public}
+                                 {:db/ident :repo.visibility/private}
+                                 {:db/ident       :repo/visibility
+                                  :db/valueType   :db.type/ref
+                                  :db/cardinality :db.cardinality/one}])
+              @(d/transact conn [{:db/id (repo (db) "victor" "datascript")
+                                  :repo/visibility
+                                  :repo.visibility/private}]))]
+   [35 (fn [] @(d/transact conn issue-schema)
+              @(d/transact conn
+                 [{:db/id (repo (db) "tonsky" "datascript")
+                   :repo/issues
+                   [{:issue/title "Support tuple bindings in :find"
+                     :issue/state :issue.state/open
+                     :issue/comments
+                     [{:comment/body   "PR incoming — same trick as Datomic?"
+                       :comment/author [:user/name "pithyless"]}
+                      {:comment/body   "Yes. Keep the API surface identical."
+                       :comment/author [:user/name "tonsky"]}]}]}]))]
+   [40 (fn [] @(d/transact conn [{:db/ident       :user/twitter
+                                  :db/valueType   :db.type/string
+                                  :db/cardinality :db.cardinality/one}])
+              @(d/transact conn [{:db/id [:user/name "tonsky"]
+                                  :user/twitter "@tonsky"}]))]
+   [43 (fn [] (intern 'domain-modeling.repl 'victor [:user/name "victor"])
+              (intern 'domain-modeling.repl 't-before (d/basis-t (db)))
+              @(d/transact conn [{:db/id [:user/name "victor"]
+                                  :user/email "victor@4coders.com.br"}]))]
+   [44 (fn [] @(d/transact conn [[:db/retract [:user/name "victor"]
+                                  :user/stars (repo (db) "clojure" "clojure")]])
+              @(d/transact conn [[:db/cas [:user/name "victor"] :user/email
+                                  "victor@4coders.com.br"
+                                  "v@4coders.com.br"]]))]
+   [45 (fn [] @(d/transact conn [{:db/ident :audit/actor
+                                  :db/valueType :db.type/string
+                                  :db/cardinality :db.cardinality/one}
+                                 {:db/ident :audit/reason
+                                  :db/valueType :db.type/string
+                                  :db/cardinality :db.cardinality/one}])
+              @(d/transact conn [{:db/id "datomic.tx"
+                                  :audit/actor  "bruna"
+                                  :audit/reason "COI import batch #42"}
+                                 {:db/id [:user/name "richhickey"]
+                                  :user/twitter "@richhickey"}]))]])
+
+(defn goto!
+  "Teleport to SLIDE n. Announces where we are in the class, then
+   rebuilds the in-memory db from scratch by replaying every prior
+   slide's writes in canonical order — entity ids and t values in the
+   `;; =>` comments reproduce exactly. Idempotent; back-jumps welcome."
+  [n]
+  (let [[p title] (or (slide-notes n) [nil "(uncharted territory)"])]
+    (fresh!)
+    (doseq [[at thunk] replay :when (< at n)] (thunk))
+    (println)
+    (println "════════════════════════════════════════════════════════════")
+    (println (str "  ▶ SLIDE " n "  ·  " (get parts p "…")))
+    (println (str "  ▶ " title))
+    (println (str "  ▶ db rebuilt: " (count (seq (d/datoms (db) :eavt)))
+                  " datoms · basis-t " (d/basis-t (db))
+                  " · eval forms below, top → bottom"))
+    (println "════════════════════════════════════════════════════════════")
+    [:slide n :ready]))
