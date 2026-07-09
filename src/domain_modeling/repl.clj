@@ -195,7 +195,6 @@
 
 
 
-
   ;; ═════════════════════════════════════════════════ SLIDE 12 ═══
   ;; §1.2 · First facts
   (goto! 12)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
@@ -336,7 +335,7 @@
   ;; ─── 2.1 The four result shapes ──────────────────────────────────
   (d/q '[:find ?name
          :where [_ :user/name ?name]]
-       (db))
+         (db))
   ;; => #{["pithyless"] ["richhickey"] ["tonsky"]}     relation (set of tuples)
 
   (d/q '[:find [?name ...]                             ;; collection
@@ -353,8 +352,8 @@
   ;; want order, sort in Clojure: (sort (d/q ...)).
 
   (d/q '[:find [?name ?email]                          ;; single tuple
-         :where [?e :user/name ?name]
-                [?e :user/email ?email]]
+         :where [_ :user/name ?name]
+                [_ :user/email ?email]]
        (db))
   ;; => nil — nobody has an email yet. Also correct! No nulls, no rows,
   ;; just the absence of facts.
@@ -634,9 +633,17 @@
   ;; §2.7 · Refs: the owner interview question
   (goto! 21)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
 
-  @(d/transact conn repo-schema)
-  @(d/transact conn seed-owners)  ;; owners FIRST — see note above
-  @(d/transact conn seed)
+  ;; GOTCHA: this seeding is NOT re-runnable in place. Repo identity is
+  ;; the composite tuple :repo/owner+slug, and composite tuples don't
+  ;; participate in upsert — so transacting `seed` onto an already-
+  ;; seeded db dies with :db.error/unique-conflict. (Contrast
+  ;; seed-owners: :user/name / :org/name are asserted directly, so it
+  ;; upserts and is idempotent.) Hence the (goto! 21) inside the `do`:
+  ;; refresh to the start of this slide, THEN seed — safe to re-eval.
+  (do (goto! 21)
+      @(d/transact conn repo-schema)
+      @(d/transact conn seed-owners)  ;; owners FIRST — see note above
+      @(d/transact conn seed))
 
 
 
@@ -1681,8 +1688,8 @@
 
   @(d/transact conn
      [{:db/id "datomic.tx"                   ;; ← the tx's OWN tempid
-       :audit/actor  "bruna"
-       :audit/reason "COI import batch #42"}
+       :audit/actor  "audit-userd"
+       :audit/reason "import batch #42"}
       {:db/id [:user/name "richhickey"] :user/twitter "@richhickey"}])
 
   ;; Provenance query: what happened to rich, when, who, why?
@@ -1989,7 +1996,11 @@
                                   :user/email "rich@example.com"}
                                  {:db/id [:user/name "tonsky"]
                                   :user/email "tonsky@example.com"}]))]
-   [21 (fn [] @(d/transact conn repo-schema)
+   [21 (fn [] ;; NB: the slide block wraps these in (do (goto! 21) …) so
+              ;; it's re-runnable at the REPL. Do NOT copy the goto! in
+              ;; here — goto! drives this table; a fresh! mid-replay
+              ;; would wipe the db it is rebuilding.
+              @(d/transact conn repo-schema)
               @(d/transact conn seed-owners)
               @(d/transact conn seed))]
    [28 (fn [] @(d/transact conn [{:db/ident       :repo/topics
