@@ -36,6 +36,26 @@
     :db/cardinality :db.cardinality/one
     :db/doc         "Issue-tracker id for the change. Lives ON the tx."}])
 
+;; ─────────────────────────────────────────────────────────────────────
+;; ONE DETAIL THE CLASS ONLY WAVED AT — the "datomic.tx" tempid
+;; ─────────────────────────────────────────────────────────────────────
+;; Every transaction you ran tonight created one entity you didn't ask
+;; for: the TRANSACTION ITSELF. That's where :db/txInstant lives — it
+;; was the first datom of every receipt you read in §4.1.
+;;
+;; Inside tx-data, the string "datomic.tx" is a RESERVED tempid that
+;; resolves to that about-to-be-created tx entity. So the map
+;;
+;;   {:db/id "datomic.tx" :audit/actor "…" :audit/reason "…"}
+;;
+;; attaches facts TO THE VERY TRANSACTION THAT CARRIES IT. Note what
+;; that buys you over an audit table: the change and its annotation
+;; are ONE atomic write — they commit together or fail together, so
+;; an audit row can never be missing, late, or pointing at the wrong
+;; change. (Ordinary string tempids — §2.7's "clj"/"ds" — name NEW
+;; domain entities; this reserved one names the tx.) Every exercise
+;; below leans on this one move.
+
 (defn start!
   "Class db through Part 4 (slide 41 state), plus tonight's incident:
    at some point an unattended bot imported emails from a stale CSV
@@ -45,8 +65,8 @@
   (class/goto! 41)
   @(d/transact class/conn audit-schema)
   @(d/transact class/conn
-     [{:db/id "datomic.tx"
-       :audit/actor  "intern-bot"
+     [{:db/id "datomic.tx"                ;; ← reserved tempid = this
+       :audit/actor  "intern-bot"          ;;   very tx (note above)
        :audit/reason "backfill emails from crm-export.csv"
        :audit/ticket "JIRA-1337"}
       {:db/id [:user/name "pithyless"] :user/email "norbert@oldcorp.example"}
@@ -177,7 +197,8 @@
   ;;
   ;; Why this is misery elsewhere: UPDATE erased the author with the
   ;; value. Here the current datom still carries the tx that wrote
-  ;; it — join the present against its own history.
+  ;; it — join the present against its own history. (Same two-source
+  ;; $/$hist move as §4.2's provenance query — more inputs, same $.)
   ;;
   ;; Two holes: the op that means "the moment it became true", and
   ;; which db the SECOND source must be.
@@ -264,10 +285,14 @@
       [___ e a v]     ;; it was asserted  ⇒ take it back
       [___ e a v]))   ;; it was retracted ⇒ put it back
 
-  ;; the compensating transaction — inverted datoms + its OWN audit:
+  ;; the compensating transaction — inverted datoms + its OWN audit.
+  ;; (Look at what invert emits: the attribute slot holds a NUMBER,
+  ;; the attr's entity id straight off the log, not a keyword. Tx
+  ;; data takes either — attributes are entities (§3) and the
+  ;; keyword is just their :db/ident name.)
   @(d/transact class/conn
      (conj (mapv invert (tx-datoms bad-tx))
-           {:db/id "datomic.tx"
+           {:db/id "datomic.tx"          ;; the revert annotates itself
             :audit/actor  "victor"
             :audit/reason "revert JIRA-1337 — stale CSV"
             :audit/ticket "JIRA-1338"}))
@@ -326,7 +351,15 @@
   ;;
   ;; 4a. Product: "twitter is dead, call it handle." — RENAME.
   ;;     Idents are just datoms on the attribute entity; rename it
-  ;;     like any other fact (annotated, of course):
+  ;;     like any other fact (annotated, of course). Two mechanics
+  ;;     the class only implied:
+  ;;      · :db/id below is a KEYWORD. An ident resolves to its
+  ;;        entity anywhere an entity id is expected — :user/twitter
+  ;;        IS an entity id, spelled by name (§3).
+  ;;      · asserting a new :db/ident on that entity IS the rename.
+  ;;        The old name is kept as an "obsolete ident": it still
+  ;;        resolves (proof two forms down), so code deployed against
+  ;;        the old name doesn't break at flip time.
   (def t-before-rename (d/basis-t (db)))
 
   @(d/transact class/conn
@@ -345,7 +378,12 @@
   ;; => true
 
   ;; 4b. Product: "people have several handles now." — CARDINALITY.
-  ;;     Alter the attribute by transacting the new value at it:
+  ;;     Alter the attribute by transacting the new value at it —
+  ;;     installing and ALTERING schema are the same operation, and
+  ;;     it takes effect immediately. (Datomic validates what may
+  ;;     change: cardinality, uniqueness, index, isComponent,
+  ;;     noHistory… but never :db/valueType — values already written
+  ;;     under a type can't be reinterpreted.)
   @(d/transact class/conn
      [{:db/id :user/handle :db/cardinality ___}
       {:db/id "datomic.tx"
