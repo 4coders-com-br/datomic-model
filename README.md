@@ -51,17 +51,17 @@ under that slide anchor first:
 ```
 
 `goto!` rebuilds the in-memory database from scratch to the exact starting state
-for that slide, then prints the current class section and basis-t. For the final
-exercise state:
+for that slide, then prints the current class section and basis-t. For the
+exercises (slide 41, end of Part 5):
 
 ```clojure
-(domain-modeling.repl/goto! 53)
+(domain-modeling.repl/goto! 41)
 ```
 
 Expected result:
 
 ```clojure
-[:slide 53 :ready]
+[:slide 41 :ready]
 ```
 
 ## Reset Manually

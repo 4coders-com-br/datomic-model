@@ -1,7 +1,7 @@
 (ns domain-modeling.repl
   "ONE DATABASE, MANY SHAPES — Domain Modeling with Datoms
    ════════════════════════════════════════════════════════════════════
-   REPL companion for the 2-hour class. Sections (§0–§7) mirror the
+   REPL companion for the 2-hour class. Sections (§0–§6) mirror the
    slide deck: every slide tagged `REPL §n` has its live code here.
 
    Inspired by / rebuilt from:
@@ -122,7 +122,7 @@
 ;; That's the whole physical model. Rows, documents, graphs, key-value
 ;; pairs, event logs — every "shape" in this class is just an
 ;; arrangement of these. We start with the E-A-V core; Tx and Op join
-;; the party in §6 (time).
+;; the party in §4 (time).
 
 ;; ─── 1.1 A little schema (attributes are entities — more in §3) ─────
 
@@ -573,7 +573,7 @@
    {:db/id [:user/name "tonsky"]    :user/stars #{"clj"}}
    {:db/id [:user/name "pithyless"] :user/stars #{"clj" "ds"}}
    {:db/id [:user/name "victor"]    :user/stars #{"clj"}}
-   ;; a follow chain for §4.5 graph traversal. GOTCHA: on a
+   ;; a follow chain for §6.5 graph traversal. GOTCHA: on a
    ;; cardinality-MANY attr a bare vector means MANY VALUES, so a
    ;; naked lookup ref would splinter into `:user/name` + a tempid.
    ;; Wrap it in a set (or vector-of-one):
@@ -972,24 +972,86 @@
   )
 
 ;; ═════════════════════════════════════════════════════════════════════
-;; §4 · ONE STORE, MANY SHAPES                            (slides 30-41)
+;; §4 · TIME — columns four and five                      (slides 30-36)
 ;; ═════════════════════════════════════════════════════════════════════
-;; The pitch of this whole class:
-;;
-;;   Sort the SAME datoms four ways and you get four databases.
-;;
-;;   EAVT  entity-first     → a row store        (PostgreSQL-ish)
-;;   AEVT  attribute-first  → a column store     (warehouse-ish)
-;;   AVET  attr+value       → a key-value store  (Redis-ish)
-;;   VAET  value-first*     → a graph, reversed  (Neo4j-ish)
-;;                            (*refs only)
-;;
-;; Datomic maintains all four continuously. `d/datoms` gives you raw,
-;; lazy, sorted access to each — the query engine is "just" a
-;; constraint solver walking these.
+;; E-A-V models your domain AT REST. Change over time is the other two:
+;;   Tx  — which transaction (atomicity + provenance handle)
+;;   Op  — true (assert) | false (retract)
+;; "Update" is not a primitive. It's retract + assert, same Tx.
 
-;; ─── §4.1 · Shape: KEY-VALUE store (AVET) ────────────────────────────
 (comment
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ;; ═════════════════════════════════════════════════ SLIDE 31 ═══
+  ;; §4.1 · "Update" is not a primitive
+  (goto! 31)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+
+  ;; ─── 4.1 Update-in-place, decomposed ─────────────────────────────
+  (def victor [:user/name "victor"])
+  (def t-before (d/basis-t (db)))            ;; bookmark for time travel
+
+  (def update-report                         ;; keep the receipt this time
+    @(d/transact conn
+       [{:db/id victor :user/email "victor@4coders.com.br"}]))
+  ;; For cardinality-one, Datomic expands this to BOTH datoms:
+  ;;   [e :user/email "victor@example.com"    tx false]  ← retract
+  ;;   [e :user/email "victor@4coders.com.br" tx true ]  ← assert
+
+  ;; DEBUG MOVE №1 — read the receipt. Every transact returns a map;
+  ;; :tx-data is the actual datoms that hit the log, tx included:
+  (let [db* (:db-after update-report)]
+    (map #(datom->vec db* %) (:tx-data update-report)))
+  ;; => ([13194139534333 :db/txInstant #inst "2026-…"        13194139534333 true ]
+  ;;     [17592186045424 :user/email "victor@4coders.com.br" 13194139534333 true ]
+  ;;     [17592186045424 :user/email "victor@example.com"    13194139534333 false])
+  ;; One map in, three datoms out — the auto-retract is right there,
+  ;; and the first datom is the transaction stamping its own clock.
+
+  ;; Proof at rest — the history db keeps every 5-tuple ever true:
+  (->> (d/q '[:find ?v ?tx ?op
+              :in $ ?e
+              :where [?e :user/email ?v ?tx ?op]]
+            (d/history (db)) victor)
+       (sort-by (juxt second last)))
+  ;; => (["victor@example.com"     13194139534319 true ]  ← seeded (§2)
+  ;;     ["victor@example.com"     13194139534333 false]  ← auto-retract…
+  ;;     ["victor@4coders.com.br"  13194139534333 true ]) ← …new assert, SAME tx
+  ;; Nothing was overwritten. The past is immutable; the present is
+  ;; just the fold of the log.
+
+  ;; DEBUG MOVE №2 — d/datoms: stare at one entity's raw truth (EAVT).
+  ;; When a query surprises you, THIS is the ground you stand on:
+  (let [db* (db)]
+    (->> (d/datoms db* :eavt (d/entid db* victor))
+         (map #(datom->vec db* %))))
+  ;; => the present-tense datoms for victor — email already swapped,
+  ;;    exactly one :user/email datom. No hidden state anywhere.
+
+  ;; New t now
+  (d/basis-t (db))
+
 
 
 
@@ -1015,28 +1077,55 @@
 
 
   ;; ═════════════════════════════════════════════════ SLIDE 32 ═══
-  ;; §4.1 · Shape 1/7: key-value store (AVET)   [slide 31 = the core trick above]
+  ;; §4.1 · Surgical writes: retract & CAS
   (goto! 32)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
 
-  ;; GET user by natural key — a lookup ref IS a key:
-  (d/pull (db) [:user/email] [:user/name "tonsky"])
-  ;; => {:user/email "tonsky@example.com"}
+  ;; Explicit retraction (e.g. cardinality-many — surgical forget):
+  @(d/transact conn
+     [[:db/retract [:user/name "victor"] :user/stars
+       (repo (db) "clojure" "clojure")]])   ;; un-star, nothing else
 
-  ;; That sugar is powered by the AVET index. See it raw:
-  (->> (d/datoms (db) :avet :user/name)
-       (map (juxt :v :e)))
-  ;; => (["pithyless" 17592186045420] ["richhickey" 17592186045418]
-  ;;     ["tonsky" 17592186045419] ["victor" 17592186045424])
-  ;; Sorted by (A,V) ⇒ point lookups AND range scans:
-  (->> (d/index-range (db) :user/name "p" "u")   ;; names in [p,u)
-       (map :v))
-  ;; => ("pithyless" "richhickey" "tonsky")
-  ;; SET = transact. DEL = retract. TTL = your cron + retract. Redis,
-  ;; minus the second database to keep consistent.
-  )
+  ;; The retraction is itself a datom — same shape, :added false:
+  (->> (d/q '[:find ?tx ?op
+              :in $ ?e ?r
+              :where [?e :user/stars ?r ?tx ?op]]
+            (d/history (db)) victor (repo (db) "clojure" "clojure"))
+       (sort-by first))
+  ;; => ([13194139534322 true] [13194139534334 false])
+  ;;    starred in §2's seed, un-starred just now. Two facts, zero
+  ;;    DELETEs — "forgotten" is one more thing the db remembers.
 
-;; ─── §4.2 · Shape: RELATIONAL rows (EAVT) ────────────────────────────
-(comment
+  ;; Optimistic concurrency in one form — compare-and-swap:
+  @(d/transact conn
+     [[:db/cas victor :user/email
+       "victor@4coders.com.br" "v@4coders.com.br"]])
+  ;; and a stale CAS fails the WHOLE tx (atomicity!):
+  ;; @(d/transact conn [[:db/cas victor :user/email "old@wrong" "x@y"]])
+  ;; => ExceptionInfo :db.error/cas-failed
+
+  ;; ─── Retract a whole ENTITY ───────────────────────────────────────
+  @(d/transact conn
+     [{:user/name "spambot" :user/email "click@here.biz"}])   ;; oops
+  @(d/transact conn
+     [[:db/retractEntity [:user/name "spambot"]]])
+  ;; :db/retractEntity retracts every attribute datom AND every ref
+  ;; pointing AT the entity; :db/isComponent children cascade with it
+  ;; (you'll watch that eat a document tree in §6.4).
+
+  ;; Present tense: gone. No tombstone, no deleted_at column:
+  (d/q '[:find ?e . :where [?e :user/name "spambot"]] (db))
+  ;; => nil
+
+  ;; History: remembered. The db never lies about what it once said:
+  (d/q '[:find ?aname ?v ?op
+         :where [?e :user/name "spambot"]
+                [?e ?a ?v _ ?op]
+                [?a :db/ident ?aname]]
+       (d/history (db)))
+  ;; => #{[:user/name  "spambot"        true] [:user/name  "spambot"        false]
+  ;;      [:user/email "click@here.biz" true] [:user/email "click@here.biz" false]}
+  ;; Audits, "who deleted this?", undelete — all queries, no backups.
+
 
 
 
@@ -1062,40 +1151,69 @@
 
 
   ;; ═════════════════════════════════════════════════ SLIDE 33 ═══
-  ;; §4.2 · Shape 2/7: relational rows (EAVT)
+  ;; §4.2 · Transactions are entities — annotate them
   (goto! 33)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
 
-  ;; entity = row, attribute = column, query = SELECT:
-  ;;
-  ;;   SELECT u.name, u.email, count(s.repo_id)
-  ;;   FROM users u JOIN stars s ON s.user_id = u.id
-  ;;   GROUP BY u.id;
-  (->> (d/q '[:find ?name ?email (count ?r)
-              :keys  user email starred            ;; maps out = rows
-              :where [?u :user/name ?name]
-                     [(get-else $ ?u :user/email "—") ?email]
-                     [?u :user/stars ?r]]
-            (db))
-       (sort-by :user)
-       print-table)
-  ;;  | :user     | :email             | :starred |
-  ;;  |-----------+--------------------+----------|
-  ;;  | pithyless | —                  |        2 |
-  ;;  | tonsky    | tonsky@example.com |        1 |
-  ;;  | victor    | victor@example.com |        1 |
-  ;; (richhickey has no :user/stars datom ⇒ no row: clause semantics
-  ;;  are inner joins. Want SQL's LEFT JOIN? get-else, or pull.)
+  ;; ─── 4.2 Transactions are entities. Annotate them. ───────────────
+  @(d/transact conn
+     [{:db/ident :audit/actor  :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one}
+      {:db/ident :audit/reason :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one}
+      {:db/ident :user/twitter :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one}])
 
-  ;; The row itself, materialized on demand from EAVT:
-  (->> (d/datoms (db) :eavt [:user/name "tonsky"])
-       (map #(datom->vec (db) %)))
-  ;; => all datoms for that E, contiguous on "disk" — that IS the row.
-  ;; Difference from SQL: the row is a VIEW you asked for, not the
-  ;; storage physics you're stuck with.
-  )
+  (def audit-report
+    @(d/transact conn
+       [{:db/id "datomic.tx"                   ;; ← the tx's OWN tempid
+         :audit/actor  "bruna"
+         :audit/reason "COI import batch #42"}
+        {:db/id [:user/name "richhickey"] :user/twitter "@richhickey"}]))
 
-;; ─── §4.3 · Shape: COLUMN store (AEVT) ───────────────────────────────
-(comment
+  ;; The receipt again — this time the tx annotated ITSELF. The first
+  ;; three datoms' E is the transaction:
+  (let [db* (:db-after audit-report)]
+    (map #(datom->vec db* %) (:tx-data audit-report)))
+  ;; => ([13194139534340 :db/txInstant #inst "2026-…"      13194139534340 true]
+  ;;     [13194139534340 :audit/actor  "bruna"             13194139534340 true]
+  ;;     [13194139534340 :audit/reason "COI import batch #42" …          true]
+  ;;     [17592186045418 :user/twitter "@richhickey"       13194139534340 true])
+
+  ;; :tempids resolves "datomic.tx" to the real tx id; t ↔ tx is
+  ;; just arithmetic:
+  (let [tx (get (:tempids audit-report) "datomic.tx")]
+    {:tx tx :t (d/tx->t tx) :and-back (d/t->tx (d/tx->t tx))})
+  ;; => {:tx 13194139534340, :t 1028, :and-back 13194139534340}
+
+  ;; And because a tx is an entity, pull works on it like anything:
+  (d/pull (db) '[*] (get (:tempids audit-report) "datomic.tx"))
+  ;; => {:db/id 13194139534340, :db/txInstant #inst "2026-…",
+  ;;     :audit/actor "bruna", :audit/reason "COI import batch #42"}
+
+  ;; Provenance query: what happened to rich, when, who, why?
+  ;; Two sources: $hist for the fact's history, $ (present) for the
+  ;; tx entity's metadata — multi-db queries are just more inputs.
+  (d/q '[:find ?v ?inst ?actor ?why
+         :in $ $hist ?e
+         :where [$hist ?e :user/twitter ?v ?tx true]
+                [?tx :db/txInstant ?inst]
+                [(get-else $ ?tx :audit/actor "?") ?actor]
+                [(get-else $ ?tx :audit/reason "?") ?why]]
+       (db) (d/history (db)) [:user/name "richhickey"])
+  ;; => #{["@richhickey" #inst "2026-..." "bruna" "COI import batch #42"]}
+  ;; "Three months later, WHY does this row say that?" — answered in
+  ;; one query, forever, for free. This alone sells the model.
+
+  ;; Audit dashboard in one query — every annotated tx in the system:
+  (d/q '[:find ?inst ?actor ?why
+         :where [?tx :audit/actor  ?actor]
+                [?tx :audit/reason ?why]
+                [?tx :db/txInstant ?inst]]
+       (db))
+  ;; => #{[#inst "2026-…" "bruna" "COI import batch #42"]}
+  ;; Put :audit/actor in your transact middleware on day one and this
+  ;; IS your compliance story. No trigger, no audit table, no drift.
+
 
 
 
@@ -1121,8 +1239,392 @@
 
 
   ;; ═════════════════════════════════════════════════ SLIDE 34 ═══
-  ;; §4.3 · Shape 3/7: column store (AEVT)
+  ;; §4.3 · Time-travel APIs
   (goto! 34)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+
+  ;; ─── 4.3 Time-travel APIs ─────────────────────────────────────────
+  (d/q '[:find ?email . :in $ ?e :where [?e :user/email ?email]]
+       (d/as-of (db) t-before) victor)
+  ;; => "victor@example.com"          the db AS IT WAS. Same query!
+  ;; (as-of also takes a #inst — (d/as-of (db) #inst "2026-07-15")
+  ;;  is "the db at that wall-clock moment". Nightly reports that
+  ;;  never disagree with each other: pick one basis, query away.)
+
+  (d/q '[:find ?email . :in $ ?e :where [?e :user/email ?email]]
+       (db) victor)
+  ;; => "v@4coders.com.br"            now
+
+  ;; since = only what's new after t (note: entities may lack their
+  ;; identity attrs in a since-db — join it with the present when
+  ;; you need names; classic gotcha):
+  (count (seq (d/datoms (d/since (db) t-before) :eavt)))
+  ;; => small number: just the recent datoms
+
+  ;; ─── The history db: the audit trail you never built ─────────────
+  ;; One field's COMPLETE story — value, wall clock, assert/retract:
+  (->> (d/q '[:find ?v ?inst ?op
+              :in $ ?e
+              :where [?e :user/email ?v ?tx ?op]
+                     [?tx :db/txInstant ?inst]]
+            (d/history (db)) victor)
+       (sort-by (juxt second (comp not last))))
+  ;; => (["victor@example.com"     #inst "…" true ]   seeded (§2)
+  ;;     ["victor@4coders.com.br"  #inst "…" true ]   §4.1 update: assert…
+  ;;     ["victor@example.com"     #inst "…" false]   …and retract, same tx
+  ;;     ["v@4coders.com.br"       #inst "…" true ]   §4.1 CAS: assert…
+  ;;     ["victor@4coders.com.br"  #inst "…" false])  …and retract, same tx
+  ;; Five facts = every email victor ever had, with timestamps.
+  ;; The SQL version of this table is the one nobody created.
+
+  ;; retract → re-assert: history keeps the whole dance. victor
+  ;; un-starred clojure in §4.1; he regrets it:
+  @(d/transact conn
+     [[:db/add victor :user/stars (repo (db) "clojure" "clojure")]])
+
+  (->> (d/q '[:find ?tx ?op
+              :in $ ?e ?r
+              :where [?e :user/stars ?r ?tx ?op]]
+            (d/history (db)) victor (repo (db) "clojure" "clojure"))
+       (sort-by first))
+  ;; => ([13194139534322 true] [13194139534334 false] [13194139534341 true])
+  ;;    starred (§2 seed) → un-starred (§4.1) → re-starred (now).
+  ;;    Exercise E3 turns exactly this ?op pattern into a chart.
+
+  ;; How big is forever? Present vs everything-ever, same index API:
+  {:present (count (seq (d/datoms (db) :eavt)))
+   :ever    (count (seq (d/datoms (d/history (db)) :eavt)))}
+  ;; => {:present 399, :ever 411}   (± a few by version) — a dozen
+  ;;    datoms apart: immutability is cheaper than the rumors say
+  ;;    (structural sharing + append-only storage).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ;; ═════════════════════════════════════════════════ SLIDE 35 ═══
+  ;; §4.4 · What-if: a database you can lie to
+  (goto! 35)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+
+  ;; ─── 4.4 What-if: a database you can lie to ──────────────────────
+  (let [{spec :db-after}
+        (d/with (db)
+                [{:repo/slug "lupii" :repo/owner victor
+                  :repo/language #{"Clojure"}}])]
+    {:speculative (d/q '[:find (count ?r) . :where [?r :repo/slug _]] spec)
+     :real        (d/q '[:find (count ?r) . :where [?r :repo/slug _]] (db))})
+  ;; => {:speculative 5, :real 4}
+  ;; Transaction + query + rollback, no lock, no cleanup. Test suites,
+  ;; dry-run endpoints, "preview this change" UIs — all d/with.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ;; ═════════════════════════════════════════════════ SLIDE 36 ═══
+  ;; §4.5 · Filtered dbs: permissions as datom predicates
+  (goto! 36)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+
+  ;; ─── 4.5 Filtered dbs: permissions as datom predicates ───────────
+  (let [email-attr (d/entid (db) :user/email)
+        public-db  (d/filter (db)
+                             (fn [_ dtm] (not= email-attr (:a dtm))))]
+    (d/pull public-db '[*] victor))
+  ;; => {:db/id ..., :user/name "victor",
+  ;;     :user/stars [...], :user/follows [...]}
+  ;;    — no :user/email key AT ALL. Hand `public-db` to any query;
+  ;;    the facts simply do not exist from its point of view. No
+  ;;    WHERE-clause discipline, no view soup: filter datoms, then
+  ;;    "go ahead, the sky's the limit".
+
+  ;; (Mentioning for completeness: true deletion for compliance/GDPR
+  ;;  exists too — excision — a special tx that removes datoms and
+  ;;  leaves a tombstone acknowledging it did.)
+  )
+
+;; ═════════════════════════════════════════════════════════════════════
+;; §5 · CLOSING NOTES + EXERCISES                   (slides 37-41 · 54-55)
+;; ═════════════════════════════════════════════════════════════════════
+;; Architecture in one paragraph: a single TRANSACTOR serializes
+;; writes (that's your ACID + total order); STORAGE is pluggable and
+;; dumb (Postgres, DynamoDB, Cassandra, dev files, memory — it stores
+;; blocks, not semantics); PEERS are your app processes — they hold
+;; the indexes' working set in local memory and run queries THERE.
+;; Reads scale by adding peers; most queries never cross the wire.
+;; Every db value carries its basis-t, so "eventual consistency
+;; surprise" is structurally impossible: you always know exactly
+;; which point in time you're querying.
+;;
+;; Same mental model, different trade-offs:
+;;   DataScript — this entire model in the browser (tonsky's — you
+;;                queried its repo tonight). re-frame app-db as a
+;;                triple store; pull/EQL as your wire protocol.
+;;   Datahike   — open-source, durable, Datomic-flavored.
+;;   XTDB       — bitemporal (valid-time + tx-time) Datalog.
+;;
+;; Modeling heuristics to leave the room with:
+;;   1. Model ATTRIBUTES, not tables. Namespaces group concepts
+;;      (:user/*, :repo/*) — they are not containers, just names.
+;;   2. Identity: :db.unique/identity for external keys (upsert +
+;;      lookup refs). Composite reality? :db/tupleAttrs (§3).
+;;   3. Relationships are refs. Direction: pick the natural one —
+;;      VAET (§6) makes the reverse free (:user/_follows).
+;;   4. Ownership (delete-together) is :db/isComponent. Association
+;;      is a plain ref. Choose consciously; cascades follow.
+;;   5. Enums are idents (§3) — refs, not strings.
+;;   6. Absence beats null. Don't transact placeholder values.
+;;   7. Annotate transactions (who/why) from day one. Future-you
+;;      debugging an import at 2am will send a thank-you note.
+;;   8. When NOT this model: unbounded high-churn streams you'll
+;;      never audit (mouse moves, tick-by-tick books — Pulsar/Kafka
+;;      territory), blob storage, and write volumes beyond a single
+;;      transactor's serialization point.
+
+(comment
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ;; ═════════════════════════════════════════════════ SLIDE 41 ═══
+  ;; §5 · Exercises E1–E5 (goto! 41 = class db through Part 4)
+  (goto! 41)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+
+  ;; ── EXERCISES (solutions: honor system — REPL doesn't lie) ───────
+  ;; E1  Pull requests: a PR is a repo relationship (from-branch on a
+  ;;     fork → to a repo) with a state enum. Design the attributes;
+  ;;     transact one PR from victor's fork to tonsky/datascript;
+  ;;     write the query "open PRs targeting repos I own".
+  ;;
+  ;; E2  Teams: orgs have teams, teams have members with a role enum
+  ;;     (:role/admin :role/dev). "Which repos can victor push to?"
+  ;;     needs a 3-hop traversal — write it with a rule.
+  ;;
+  ;; E3  Stars-over-time: using d/history + :db/txInstant, produce
+  ;;     [[date star-count-delta] ...] for the clojure repo. (Hint:
+  ;;     ?op true = +1, false = -1.)
+  ;;
+  ;; E4  Rectangle detox: take one real table from your last project
+  ;;     (nullable columns, a type column, a join table). Remodel as
+  ;;     attributes. Count the concepts that disappeared.
+  ;;
+  ;; E5  DataScript field trip: paste §6.5's recommender into a
+  ;;     DataScript REPL (or a re-frame app-db). Note precisely what
+  ;;     you had to change. (Spoiler: the schema map shrinks; the
+  ;;     query survives intact.)
+  )
+
+
+;; ═════════════════════════════════════════════════════════════════════
+;; §6 · ONE STORE, MANY SHAPES                            (slides 42-53)
+;; ═════════════════════════════════════════════════════════════════════
+;; The pitch of this whole class:
+;;
+;;   Sort the SAME datoms four ways and you get four databases.
+;;
+;;   EAVT  entity-first     → a row store        (PostgreSQL-ish)
+;;   AEVT  attribute-first  → a column store     (warehouse-ish)
+;;   AVET  attr+value       → a key-value store  (Redis-ish)
+;;   VAET  value-first*     → a graph, reversed  (Neo4j-ish)
+;;                            (*refs only)
+;;
+;; Datomic maintains all four continuously. `d/datoms` gives you raw,
+;; lazy, sorted access to each — the query engine is "just" a
+;; constraint solver walking these.
+
+;; ─── §6.1 · Shape: KEY-VALUE store (AVET) ────────────────────────────
+(comment
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ;; ═════════════════════════════════════════════════ SLIDE 44 ═══
+  ;; §6.1 · Shape 1/7: key-value store (AVET)   [slide 43 = the core trick above]
+  (goto! 44)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+
+  ;; GET user by natural key — a lookup ref IS a key:
+  (d/pull (db) [:user/email] [:user/name "tonsky"])
+  ;; => {:user/email "tonsky@example.com"}
+
+  ;; That sugar is powered by the AVET index. See it raw:
+  (->> (d/datoms (db) :avet :user/name)
+       (map (juxt :v :e)))
+  ;; => (["pithyless" 17592186045420] ["richhickey" 17592186045418]
+  ;;     ["tonsky" 17592186045419] ["victor" 17592186045424])
+  ;; Sorted by (A,V) ⇒ point lookups AND range scans:
+  (->> (d/index-range (db) :user/name "p" "u")   ;; names in [p,u)
+       (map :v))
+  ;; => ("pithyless" "richhickey" "tonsky")
+  ;; SET = transact. DEL = retract. TTL = your cron + retract. Redis,
+  ;; minus the second database to keep consistent.
+  )
+
+;; ─── §6.2 · Shape: RELATIONAL rows (EAVT) ────────────────────────────
+(comment
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ;; ═════════════════════════════════════════════════ SLIDE 45 ═══
+  ;; §6.2 · Shape 2/7: relational rows (EAVT)
+  (goto! 45)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+
+  ;; entity = row, attribute = column, query = SELECT:
+  ;;
+  ;;   SELECT u.name, u.email, count(s.repo_id)
+  ;;   FROM users u JOIN stars s ON s.user_id = u.id
+  ;;   GROUP BY u.id;
+  (->> (d/q '[:find ?name ?email (count ?r)
+              :keys  user email starred            ;; maps out = rows
+              :where [?u :user/name ?name]
+                     [(get-else $ ?u :user/email "—") ?email]
+                     [?u :user/stars ?r]]
+            (db))
+       (sort-by :user)
+       print-table)
+  ;;  | :user     | :email             | :starred |
+  ;;  |-----------+--------------------+----------|
+  ;;  | pithyless | —                  |        2 |
+  ;;  | tonsky    | tonsky@example.com |        1 |
+  ;;  | victor    | v@4coders.com.br   |        1 |
+  ;; (richhickey has no :user/stars datom ⇒ no row: clause semantics
+  ;;  are inner joins. Want SQL's LEFT JOIN? get-else, or pull.)
+
+  ;; The row itself, materialized on demand from EAVT:
+  (->> (d/datoms (db) :eavt [:user/name "tonsky"])
+       (map #(datom->vec (db) %)))
+  ;; => all datoms for that E, contiguous on "disk" — that IS the row.
+  ;; Difference from SQL: the row is a VIEW you asked for, not the
+  ;; storage physics you're stuck with.
+  )
+
+;; ─── §6.3 · Shape: COLUMN store (AEVT) ───────────────────────────────
+(comment
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ;; ═════════════════════════════════════════════════ SLIDE 46 ═══
+  ;; §6.3 · Shape 3/7: column store (AEVT)
+  (goto! 46)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
 
   ;; Warehouse question: language distribution across all repos —
   ;; touch ONE attribute, never load a row:
@@ -1140,7 +1642,7 @@
   ;; => [["Clojure" 4] ["ClojureScript" 1] ["Java" 1]]
   )
 
-;; ─── §4.4 · Shape: DOCUMENT store (nested tx maps + pull) ────────────
+;; ─── §6.4 · Shape: DOCUMENT store (nested tx maps + pull) ────────────
 (def issue-schema
   [{:db/ident       :repo/issues
     :db/valueType   :db.type/ref
@@ -1192,9 +1694,9 @@
 
 
 
-  ;; ═════════════════════════════════════════════════ SLIDE 35 ═══
-  ;; §4.4 · Shape 4/7: documents — write (nested maps in)
-  (goto! 35)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+  ;; ═════════════════════════════════════════════════ SLIDE 47 ═══
+  ;; §6.4 · Shape 4/7: documents — write (nested maps in)
+  (goto! 47)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
 
   @(d/transact conn issue-schema)
 
@@ -1235,9 +1737,9 @@
 
 
 
-  ;; ═════════════════════════════════════════════════ SLIDE 36 ═══
-  ;; §4.4 · Shape 4/7: documents — read (pull)
-  (goto! 36)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+  ;; ═════════════════════════════════════════════════ SLIDE 48 ═══
+  ;; §6.4 · Shape 4/7: documents — read (pull)
+  (goto! 48)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
 
   ;; READ a document: pull = declarative tree projection (GraphQL,
   ;; but it's data, not a string DSL — this is literally what EQL and
@@ -1289,9 +1791,9 @@
 
 
 
-  ;; ═════════════════════════════════════════════════ SLIDE 37 ═══
-  ;; §4.4 · Reverse refs, cascades, fulltext
-  (goto! 37)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+  ;; ═════════════════════════════════════════════════ SLIDE 49 ═══
+  ;; §6.4 · Reverse refs, cascades, fulltext
+  (goto! 49)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
 
   (d/pull (db)
           '[:user/name
@@ -1319,7 +1821,7 @@
         after  (d/q '[:find (count ?c) . :where [?c :comment/body _]] db2)]
     {:comments-before before :comments-after after})
   ;; => {:comments-before 2, :comments-after nil}
-  ;; (ran speculatively with d/with — the real db still has them. §6.)
+  ;; (ran speculatively with d/with (§4.4) — the real db still has them.)
 
   ;; Fulltext (because :issue/title had :db/fulltext true):
   (d/q '[:find ?title ?score
@@ -1332,7 +1834,7 @@
   ;; empty right after the transact, wait a beat and re-run.
   )
 
-;; ─── §4.5 · Shape: GRAPH database (VAET + recursive rules) ───────────
+;; ─── §6.5 · Shape: GRAPH database (VAET + recursive rules) ───────────
 (comment
 
 
@@ -1358,9 +1860,9 @@
 
 
 
-  ;; ═════════════════════════════════════════════════ SLIDE 38 ═══
-  ;; §4.5 · Shape 5/7: graph database (VAET + recursive rules)
-  (goto! 38)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+  ;; ═════════════════════════════════════════════════ SLIDE 50 ═══
+  ;; §6.5 · Shape 5/7: graph database (VAET + recursive rules)
+  (goto! 50)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
 
   ;; Neo4j's trick is answering "who points AT me?". That's VAET —
   ;; the reverse index over every ref in the system:
@@ -1426,9 +1928,9 @@
 
 
 
-  ;; ═════════════════════════════════════════════════ SLIDE 39 ═══
-  ;; §4.5 · The mesh payoff: a recommender in five clauses
-  (goto! 39)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+  ;; ═════════════════════════════════════════════════ SLIDE 51 ═══
+  ;; §6.5 · The mesh payoff: a recommender in five clauses
+  (goto! 51)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
 
   ;; The mesh payoff — a recommender in five lines:
   ;; "repos starred by people I (transitively) follow, minus mine"
@@ -1445,7 +1947,7 @@
   ;; written, one recursive hop. This query is why the class exists.
   )
 
-;; ─── §4.6 · Shape: EVENT LOG / stream (the log IS the database) ─────
+;; ─── §6.6 · Shape: EVENT LOG / stream (the log IS the database) ─────
 (comment
 
 
@@ -1471,9 +1973,9 @@
 
 
 
-  ;; ═════════════════════════════════════════════════ SLIDE 40 ═══
-  ;; §4.6 · Shape 6/7: the log IS the database
-  (goto! 40)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+  ;; ═════════════════════════════════════════════════ SLIDE 52 ═══
+  ;; §6.6 · Shape 6/7: the log IS the database
+  (goto! 52)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
 
   ;; The transaction log is API-accessible — your system's history as
   ;; a stream of fact-sets:
@@ -1492,7 +1994,7 @@
   ;; running CQRS since §0 without ceremony.
   )
 
-;; ─── §4.7 · Shape: SPARSE matrix / wide table ────────────────────────
+;; ─── §6.7 · Shape: SPARSE matrix / wide table ────────────────────────
 (comment
 
 
@@ -1518,411 +2020,32 @@
 
 
 
-  ;; ═════════════════════════════════════════════════ SLIDE 40 ═══
-  ;; §4.7 · Shape 7/7: sparse matrix / wide table
-  (goto! 40)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
+  ;; ═════════════════════════════════════════════════ SLIDE 52 ═══
+  ;; §6.7 · Shape 7/7: sparse matrix / wide table
+  (goto! 52)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
 
   ;; A "table" with 500 optional columns costs 500×N nulls in a
   ;; rectangle. Here, an absent fact occupies zero bytes and even
   ;; MEANS something (§2.6/§2.9: missing? found originals & the
-  ;; email-less). Add one-off attributes with no guilt:
-  @(d/transact conn
-     [{:db/ident       :user/twitter
-       :db/valueType   :db.type/string
-       :db/cardinality :db.cardinality/one}])
+  ;; email-less). :user/twitter was exactly this — a one-off attribute
+  ;; dropped in mid-class (§4.2), no ALTER TABLE, no migration, and
+  ;; nobody else was billed for the column. Give it a second user:
   @(d/transact conn
      [{:db/id [:user/name "tonsky"] :user/twitter "@tonsky"}])
-  ;; One user has it. Three don't. Nothing is null. Nobody migrated.
+  ;; Two users have it. Two don't. Nothing is null. Nobody migrated.
   (d/q '[:find ?name ?tw
          :where [?u :user/name ?name]
                 [(get-else $ ?u :user/twitter "—") ?tw]]
        (db))
-  ;; => #{["victor" "—"] ["tonsky" "@tonsky"]
-  ;;      ["pithyless" "—"] ["richhickey" "—"]}
+  ;; => #{["victor" "—"]    ["tonsky" "@tonsky"]
+  ;;      ["pithyless" "—"] ["richhickey" "@richhickey"]}
   )
 
 ;; ═════════════════════════════════════════════════════════════════════
-;; §5 (recap slide 41) — the same datoms wore seven costumes.
+;; RECAP (slide 53) — the same datoms wore seven costumes.
 ;; The moves that changed: WHICH INDEX ORDER + WHICH PROJECTION.
 ;; Query language, transaction shape, storage: identical throughout.
 ;; ═════════════════════════════════════════════════════════════════════
-
-;; ═════════════════════════════════════════════════════════════════════
-;; §6 · TIME — columns four and five                      (slides 42-48)
-;; ═════════════════════════════════════════════════════════════════════
-;; E-A-V models your domain AT REST. Change over time is the other two:
-;;   Tx  — which transaction (atomicity + provenance handle)
-;;   Op  — true (assert) | false (retract)
-;; "Update" is not a primitive. It's retract + assert, same Tx.
-
-(comment
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  ;; ═════════════════════════════════════════════════ SLIDE 43 ═══
-  ;; §6.1 · "Update" is not a primitive
-  (goto! 43)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
-
-  ;; ─── 6.1 Update-in-place, decomposed ─────────────────────────────
-  (def victor [:user/name "victor"])
-  (def t-before (d/basis-t (db)))            ;; bookmark for time travel
-
-  @(d/transact conn
-     [{:db/id victor :user/email "victor@4coders.com.br"}])
-  ;; For cardinality-one, Datomic expands this to BOTH datoms:
-  ;;   [e :user/email "victor@example.com"    tx false]  ← retract
-  ;;   [e :user/email "victor@4coders.com.br" tx true ]  ← assert
-  ;; Proof — the history db keeps every 5-tuple ever true:
-  (->> (d/q '[:find ?v ?tx ?op
-              :in $ ?e
-              :where [?e :user/email ?v ?tx ?op]]
-            (d/history (db)) victor)
-       (sort-by second))
-  ;; => (["victor@example.com"     13194139534319 true ]  ← seeded
-  ;;     ["victor@4coders.com.br"  13194139534342 true ]  ← assert…
-  ;;     ["victor@example.com"     13194139534342 false]) ← …auto-retract, SAME tx
-  ;; Nothing was overwritten. The past is immutable; the present is
-  ;; just the fold of the log.
-
-  ;; New t now
-  (d/basis-t (db))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  ;; ═════════════════════════════════════════════════ SLIDE 44 ═══
-  ;; §6.1 · Surgical writes: retract & CAS
-  (goto! 44)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
-
-  ;; Explicit retraction (e.g. cardinality-many — surgical forget):
-  @(d/transact conn
-     [[:db/retract [:user/name "victor"] :user/stars
-       (repo (db) "clojure" "clojure")]])   ;; un-star, nothing else
-
-  ;; Optimistic concurrency in one form — compare-and-swap:
-  @(d/transact conn
-     [[:db/cas victor :user/email
-       "victor@4coders.com.br" "v@4coders.com.br"]])
-  ;; and a stale CAS fails the WHOLE tx (atomicity!):
-  ;; @(d/transact conn [[:db/cas victor :user/email "old@wrong" "x@y"]])
-  ;; => ExceptionInfo :db.error/cas-failed
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  ;; ═════════════════════════════════════════════════ SLIDE 45 ═══
-  ;; §6.2 · Transactions are entities — annotate them
-  (goto! 45)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
-
-  ;; ─── 6.2 Transactions are entities. Annotate them. ───────────────
-  @(d/transact conn
-     [{:db/ident :audit/actor  :db/valueType :db.type/string
-       :db/cardinality :db.cardinality/one}
-      {:db/ident :audit/reason :db/valueType :db.type/string
-       :db/cardinality :db.cardinality/one}
-      {:db/ident :user/twitter :db/valueType :db.type/string
-       :db/cardinality :db.cardinality/one}])
-
-  @(d/transact conn
-     [{:db/id "datomic.tx"                   ;; ← the tx's OWN tempid
-       :audit/actor  "audit-userd"
-       :audit/reason "import batch #42"}
-      {:db/id [:user/name "richhickey"] :user/twitter "@richhickey"}])
-
-  ;; Provenance query: what happened to rich, when, who, why?
-  ;; Two sources: $hist for the fact's history, $ (present) for the
-  ;; tx entity's metadata — multi-db queries are just more inputs.
-  (d/q '[:find ?v ?inst ?actor ?why
-         :in $ $hist ?e
-         :where [$hist ?e :user/twitter ?v ?tx true]
-                [?tx :db/txInstant ?inst]
-                [(get-else $ ?tx :audit/actor "?") ?actor]
-                [(get-else $ ?tx :audit/reason "?") ?why]]
-       (db) (d/history (db)) [:user/name "richhickey"])
-  ;; => #{["@richhickey" #inst "2026-..." "bruna" "COI import batch #42"]}
-  ;; "Three months later, WHY does this row say that?" — answered in
-  ;; one query, forever, for free. This alone sells the model.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  ;; ═════════════════════════════════════════════════ SLIDE 46 ═══
-  ;; §6.3 · Time-travel APIs
-  (goto! 46)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
-
-  ;; ─── 6.3 Time-travel APIs ─────────────────────────────────────────
-  (d/q '[:find ?email . :in $ ?e :where [?e :user/email ?email]]
-       (d/as-of (db) t-before) victor)
-  ;; => "victor@example.com"          the db AS IT WAS. Same query!
-
-  (d/q '[:find ?email . :in $ ?e :where [?e :user/email ?email]]
-       (db) victor)
-  ;; => "v@4coders.com.br"            now
-
-  ;; since = only what's new after t (note: entities may lack their
-  ;; identity attrs in a since-db — join it with the present when
-  ;; you need names; classic gotcha):
-  (count (seq (d/datoms (d/since (db) t-before) :eavt)))
-  ;; => small number: just the recent datoms
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  ;; ═════════════════════════════════════════════════ SLIDE 47 ═══
-  ;; §6.4 · What-if: a database you can lie to
-  (goto! 47)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
-
-  ;; ─── 6.4 What-if: a database you can lie to ──────────────────────
-  (let [{spec :db-after}
-        (d/with (db)
-                [{:repo/slug "lupii" :repo/owner victor
-                  :repo/language #{"Clojure"}}])]
-    {:speculative (d/q '[:find (count ?r) . :where [?r :repo/slug _]] spec)
-     :real        (d/q '[:find (count ?r) . :where [?r :repo/slug _]] (db))})
-  ;; => {:speculative 5, :real 4}
-  ;; Transaction + query + rollback, no lock, no cleanup. Test suites,
-  ;; dry-run endpoints, "preview this change" UIs — all d/with.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  ;; ═════════════════════════════════════════════════ SLIDE 48 ═══
-  ;; §6.5 · Filtered dbs: permissions as datom predicates
-  (goto! 48)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
-
-  ;; ─── 6.5 Filtered dbs: permissions as datom predicates ───────────
-  (let [email-attr (d/entid (db) :user/email)
-        public-db  (d/filter (db)
-                             (fn [_ dtm] (not= email-attr (:a dtm))))]
-    (d/pull public-db '[*] victor))
-  ;; => {:db/id ..., :user/name "victor", :user/follows [...]}
-  ;;    — no :user/email key AT ALL. Hand `public-db` to any query;
-  ;;    the facts simply do not exist from its point of view. No
-  ;;    WHERE-clause discipline, no view soup: filter datoms, then
-  ;;    "go ahead, the sky's the limit".
-
-  ;; (Mentioning for completeness: true deletion for compliance/GDPR
-  ;;  exists too — excision — a special tx that removes datoms and
-  ;;  leaves a tombstone acknowledging it did.)
-  )
-
-;; ═════════════════════════════════════════════════════════════════════
-;; §7 · CLOSING NOTES + EXERCISES                         (slides 49-55)
-;; ═════════════════════════════════════════════════════════════════════
-;; Architecture in one paragraph: a single TRANSACTOR serializes
-;; writes (that's your ACID + total order); STORAGE is pluggable and
-;; dumb (Postgres, DynamoDB, Cassandra, dev files, memory — it stores
-;; blocks, not semantics); PEERS are your app processes — they hold
-;; the indexes' working set in local memory and run queries THERE.
-;; Reads scale by adding peers; most queries never cross the wire.
-;; Every db value carries its basis-t, so "eventual consistency
-;; surprise" is structurally impossible: you always know exactly
-;; which point in time you're querying.
-;;
-;; Same mental model, different trade-offs:
-;;   DataScript — this entire model in the browser (tonsky's — you
-;;                queried its repo tonight). re-frame app-db as a
-;;                triple store; pull/EQL as your wire protocol.
-;;   Datahike   — open-source, durable, Datomic-flavored.
-;;   XTDB       — bitemporal (valid-time + tx-time) Datalog.
-;;
-;; Modeling heuristics to leave the room with:
-;;   1. Model ATTRIBUTES, not tables. Namespaces group concepts
-;;      (:user/*, :repo/*) — they are not containers, just names.
-;;   2. Identity: :db.unique/identity for external keys (upsert +
-;;      lookup refs). Composite reality? :db/tupleAttrs (§3).
-;;   3. Relationships are refs. Direction: pick the natural one —
-;;      VAET makes the reverse free (:user/_follows).
-;;   4. Ownership (delete-together) is :db/isComponent. Association
-;;      is a plain ref. Choose consciously; cascades follow.
-;;   5. Enums are idents (§3) — refs, not strings.
-;;   6. Absence beats null. Don't transact placeholder values.
-;;   7. Annotate transactions (who/why) from day one. Future-you
-;;      debugging an import at 2am will send a thank-you note.
-;;   8. When NOT this model: unbounded high-churn streams you'll
-;;      never audit (mouse moves, tick-by-tick books — Pulsar/Kafka
-;;      territory), blob storage, and write volumes beyond a single
-;;      transactor's serialization point.
-
-(comment
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  ;; ═════════════════════════════════════════════════ SLIDE 53 ═══
-  ;; §7 · Exercises E1–E5 (goto! 53 = full class db)
-  (goto! 53)   ;; ⇦ eval if you jumped here — narrates + rebuilds the db
-
-  ;; ── EXERCISES (solutions: honor system — REPL doesn't lie) ───────
-  ;; E1  Pull requests: a PR is a repo relationship (from-branch on a
-  ;;     fork → to a repo) with a state enum. Design the attributes;
-  ;;     transact one PR from victor's fork to tonsky/datascript;
-  ;;     write the query "open PRs targeting repos I own".
-  ;;
-  ;; E2  Teams: orgs have teams, teams have members with a role enum
-  ;;     (:role/admin :role/dev). "Which repos can victor push to?"
-  ;;     needs a 3-hop traversal — write it with a rule.
-  ;;
-  ;; E3  Stars-over-time: using d/history + :db/txInstant, produce
-  ;;     [[date star-count-delta] ...] for the clojure repo. (Hint:
-  ;;     ?op true = +1, false = -1.)
-  ;;
-  ;; E4  Rectangle detox: take one real table from your last project
-  ;;     (nullable columns, a type column, a join table). Remodel as
-  ;;     attributes. Count the concepts that disappeared.
-  ;;
-  ;; E5  DataScript field trip: paste §4.5's recommender into a
-  ;;     DataScript REPL (or a re-frame app-db). Note precisely what
-  ;;     you had to change. (Spoiler: the schema map shrinks; the
-  ;;     query survives intact.)
-  )
-
 
 ;; ═════════════════════════════════════════════════════════════════════
 ;; NAVIGATION — slide anchors, jump-in points, class narration
@@ -1935,15 +2058,13 @@
 ;; reproduce, and every block runs standalone. Plain top-to-bottom
 ;; evaluation never needs goto!.
 
-(declare issue-schema)          ;; defined in §4.4; replayed below
-
 (def parts
   {1 "PART 1 · The datom — the smallest fact"
    2 "PART 2 · Query — pattern matching all the way down"
    3 "PART 3 · Schema is data"
-   4 "PART 4 · One store, seven shapes"
-   5 "PART 5 · Time — columns four and five"
-   6 "PART 6 · Architecture, heuristics, homework"})
+   4 "PART 4 · Time — columns four and five"
+   5 "PART 5 · Architecture, heuristics, homework"
+   6 "PART 6 · One store, seven shapes"})
 
 (def slide-notes
   ;; slide → [part title]: what (goto! n) announces.
@@ -1965,23 +2086,23 @@
    27 [3 "Attributes are entities"]
    28 [3 "Growth = accretion; composite identity"]
    29 [3 "Enums are idents"]
-   31 [4 "Sort the same datoms four ways"]
-   32 [4 "Shape 1/7 · AVET = key-value store"]
-   33 [4 "Shape 2/7 · EAVT = relational rows"]
-   34 [4 "Shape 3/7 · AEVT = column store"]
-   35 [4 "Shape 4/7 · documents — write (nested maps in)"]
-   36 [4 "Shape 4/7 · documents — read (pull)"]
-   37 [4 "Shape 4/7 · reverse refs, cascades, fulltext"]
-   38 [4 "Shape 5/7 · VAET = graph database"]
-   39 [4 "The mesh payoff — a recommender in five clauses"]
-   40 [4 "Shapes 6 & 7 · event log · sparse matrix"]
-   43 [5 "\"Update\" is not a primitive"]
-   44 [5 "Surgical writes: retract & CAS"]
-   45 [5 "Transactions are entities — annotate them"]
-   46 [5 "Time-travel APIs"]
-   47 [5 "What-if: a database you can lie to"]
-   48 [5 "Permissions as datom predicates"]
-   53 [6 "Exercises E1–E5 — full class db, over to you"]})
+   31 [4 "\"Update\" is not a primitive"]
+   32 [4 "Surgical writes: retract & CAS"]
+   33 [4 "Transactions are entities — annotate them"]
+   34 [4 "Time-travel APIs"]
+   35 [4 "What-if: a database you can lie to"]
+   36 [4 "Permissions as datom predicates"]
+   41 [5 "Exercises E1–E5 — over to you"]
+   43 [6 "Sort the same datoms four ways"]
+   44 [6 "Shape 1/7 · AVET = key-value store"]
+   45 [6 "Shape 2/7 · EAVT = relational rows"]
+   46 [6 "Shape 3/7 · AEVT = column store"]
+   47 [6 "Shape 4/7 · documents — write (nested maps in)"]
+   48 [6 "Shape 4/7 · documents — read (pull)"]
+   49 [6 "Shape 4/7 · reverse refs, cascades, fulltext"]
+   50 [6 "Shape 5/7 · VAET = graph database"]
+   51 [6 "The mesh payoff — a recommender in five clauses"]
+   52 [6 "Shapes 6 & 7 · event log · sparse matrix"]})
 
 (def replay
   ;; slide → the WRITES that slide's own block performs. Kept in sync,
@@ -2017,7 +2138,37 @@
               @(d/transact conn [{:db/id (repo (db) "victor" "datascript")
                                   :repo/visibility
                                   :repo.visibility/private}]))]
-   [35 (fn [] @(d/transact conn issue-schema)
+   [31 (fn [] (intern 'domain-modeling.repl 'victor [:user/name "victor"])
+              (intern 'domain-modeling.repl 't-before (d/basis-t (db)))
+              @(d/transact conn [{:db/id [:user/name "victor"]
+                                  :user/email "victor@4coders.com.br"}]))]
+   [32 (fn [] @(d/transact conn [[:db/retract [:user/name "victor"]
+                                  :user/stars (repo (db) "clojure" "clojure")]])
+              @(d/transact conn [[:db/cas [:user/name "victor"] :user/email
+                                  "victor@4coders.com.br"
+                                  "v@4coders.com.br"]])
+              @(d/transact conn [{:user/name  "spambot"
+                                  :user/email "click@here.biz"}])
+              @(d/transact conn [[:db/retractEntity
+                                  [:user/name "spambot"]]]))]
+   [33 (fn [] @(d/transact conn [{:db/ident :audit/actor
+                                  :db/valueType :db.type/string
+                                  :db/cardinality :db.cardinality/one}
+                                 {:db/ident :audit/reason
+                                  :db/valueType :db.type/string
+                                  :db/cardinality :db.cardinality/one}
+                                 {:db/ident :user/twitter
+                                  :db/valueType :db.type/string
+                                  :db/cardinality :db.cardinality/one}])
+              @(d/transact conn [{:db/id "datomic.tx"
+                                  :audit/actor  "bruna"
+                                  :audit/reason "COI import batch #42"}
+                                 {:db/id [:user/name "richhickey"]
+                                  :user/twitter "@richhickey"}]))]
+   [34 (fn [] @(d/transact conn [[:db/add [:user/name "victor"]
+                                  :user/stars
+                                  (repo (db) "clojure" "clojure")]]))]
+   [47 (fn [] @(d/transact conn issue-schema)
               @(d/transact conn
                  [{:db/id (repo (db) "tonsky" "datascript")
                    :repo/issues
@@ -2028,31 +2179,8 @@
                        :comment/author [:user/name "pithyless"]}
                       {:comment/body   "Yes. Keep the API surface identical."
                        :comment/author [:user/name "tonsky"]}]}]}]))]
-   [40 (fn [] @(d/transact conn [{:db/ident       :user/twitter
-                                  :db/valueType   :db.type/string
-                                  :db/cardinality :db.cardinality/one}])
-              @(d/transact conn [{:db/id [:user/name "tonsky"]
-                                  :user/twitter "@tonsky"}]))]
-   [43 (fn [] (intern 'domain-modeling.repl 'victor [:user/name "victor"])
-              (intern 'domain-modeling.repl 't-before (d/basis-t (db)))
-              @(d/transact conn [{:db/id [:user/name "victor"]
-                                  :user/email "victor@4coders.com.br"}]))]
-   [44 (fn [] @(d/transact conn [[:db/retract [:user/name "victor"]
-                                  :user/stars (repo (db) "clojure" "clojure")]])
-              @(d/transact conn [[:db/cas [:user/name "victor"] :user/email
-                                  "victor@4coders.com.br"
-                                  "v@4coders.com.br"]]))]
-   [45 (fn [] @(d/transact conn [{:db/ident :audit/actor
-                                  :db/valueType :db.type/string
-                                  :db/cardinality :db.cardinality/one}
-                                 {:db/ident :audit/reason
-                                  :db/valueType :db.type/string
-                                  :db/cardinality :db.cardinality/one}])
-              @(d/transact conn [{:db/id "datomic.tx"
-                                  :audit/actor  "bruna"
-                                  :audit/reason "COI import batch #42"}
-                                 {:db/id [:user/name "richhickey"]
-                                  :user/twitter "@richhickey"}]))]])
+   [52 (fn [] @(d/transact conn [{:db/id [:user/name "tonsky"]
+                                  :user/twitter "@tonsky"}]))]])
 
 (defn goto!
   "Teleport to SLIDE n. Announces where we are in the class, then
