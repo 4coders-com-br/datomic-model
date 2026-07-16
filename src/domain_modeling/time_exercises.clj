@@ -3,10 +3,11 @@
    ════════════════════════════════════════════════════════════════════
    Four exercises built on Part 4 (Time — REPL §4). Every block below
    has holes marked ___ . Replace each ___ so the form evaluates to
-   the result in its `;; =>` comment. Evaluating a form with a ___
-   still in it throws `Unable to resolve symbol: ___` — that's your
-   cue, not a bug. Solutions are at the very bottom (SOLUTIONS —
-   scroll blind, no spoilers on the way).
+   the result in its `;; =>` comment. Forgot one? Outside a quoted
+   query it throws `Unable to resolve symbol: ___`; INSIDE a quoted
+   query the quote protects it, so you get a Datomic error naming
+   ___ instead — either way the cue is loud. Solutions are at the
+   very bottom (SOLUTIONS — scroll blind, no spoilers on the way).
 
    Setup: eval (start!) once. It rebuilds the class db through Part 4
    and stages tonight's incident.
@@ -136,13 +137,17 @@
   ;; Here the ticket lives on the tx, every datom carries its tx —
   ;; so one ticket number indexes ANY change to ANY entity, forever.
 
-  ;; 1a. Which transaction was it?
+  ;; 1a. Which transaction was it? (Parameterized, §2.4-style — note
+  ;;     the blank sits OUTSIDE the quoted query, where Clojure
+  ;;     actually evaluates it.)
   (def bad-tx
     (d/q '[:find ?tx .
-           :where [?tx :audit/ticket ___]]
-         (db)))
+           :in $ ?ticket
+           :where [?tx :audit/ticket ?ticket]]
+         (db) ___))         ;; ← the ticket number from the Slack thread
   bad-tx
   ;; => 13194139534343          (a plain entity id — yours will differ)
+  ;; Got nil? The query matched nothing — check the ticket string.
 
   ;; 1b. Everything that tx did — across all entities, ops included.
   ;;     Two holes: WHERE does the tx go in the datom pattern, and
@@ -200,14 +205,14 @@
   ;; it — join the present against its own history. (Same two-source
   ;; $/$hist move as §4.2's provenance query — more inputs, same $.)
   ;;
-  ;; Two holes: the op that means "the moment it became true", and
-  ;; which db the SECOND source must be.
+  ;; One hole: which db must the SECOND source be?
 
   (->> (d/q '[:find ?who ?email ?actor ?inst
               :in $ $hist
               :where [$ ?e :user/name ?who]
-                     [$ ?e :user/email ?email]              ;; current value
-                     [$hist ?e :user/email ?email ?tx ___]  ;; its assertion
+                     [$ ?e :user/email ?email]               ;; current value
+                     [$hist ?e :user/email ?email ?tx true]  ;; ← true = "the
+                     ;; moment it became true"; false would find who DELETED it
                      [$ ?tx :db/txInstant ?inst]
                      [(get-else $ ?tx :audit/actor "unattributed") ?actor]]
             (db) (___ (db)))
@@ -486,8 +491,9 @@
   ;; ─── T1 ───────────────────────────────────────────────────────────
   (def bad-tx
     (d/q '[:find ?tx .
-           :where [?tx :audit/ticket "JIRA-1337"]]
-         (db)))
+           :in $ ?ticket
+           :where [?tx :audit/ticket ?ticket]]
+         (db) "JIRA-1337"))
 
   (->> (d/q '[:find ?who ?aname ?v ?op
               :in $ ?tx
