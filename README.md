@@ -8,6 +8,11 @@ domain modeling with Datomic datoms.
 - `domain-modeling-with-datoms.pptx` - the slide deck.
 - `src/domain_modeling/repl.clj` - the live REPL companion. Slide anchors in
   the file match the deck's `REPL §n` slides.
+- `src/domain_modeling/time_exercises.clj` - "fill the gaps" exercises for the
+  last 30 minutes, built on Part 4 (Time): tx provenance, cell-level blame,
+  reverting a transaction, and schema evolution under a full audit. Eval
+  `(domain-modeling.time-exercises/start!)` to begin; solutions at the bottom
+  of the file.
 - `deps.edn` - Clojure CLI dependencies for Datomic Peer and nREPL.
 
 ## Prerequisites
