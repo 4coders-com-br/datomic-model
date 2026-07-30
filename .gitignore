@@ -4,3 +4,4 @@
 /.nrepl-port
 /.DS_Store
 /.~lock.*#
+/__pycache__/

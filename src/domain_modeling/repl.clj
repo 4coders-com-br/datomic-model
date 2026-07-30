@@ -15,7 +15,7 @@
 
      {:paths [\"src\"]
       :deps  {org.clojure/clojure {:mvn/version \"1.12.0\"}
-              com.datomic/peer    {:mvn/version \"1.0.7469\"}
+              com.datomic/peer    {:mvn/version \"1.0.7705\"}
               org.slf4j/slf4j-nop {:mvn/version \"2.0.13\"}}}
 
    Datomic Pro is free (Apache-2.0) and the peer library is on Maven
@@ -1034,7 +1034,7 @@
               :in $ ?e
               :where [?e :user/email ?v ?tx ?op]]
             (d/history (db)) victor)
-       (sort-by (juxt second last)))
+       #_(sort-by (juxt second last)))
   ;; => (["victor@example.com"     13194139534319 true ]  ← seeded (§2)
   ;;     ["victor@example.com"     13194139534333 false]  ← auto-retract…
   ;;     ["victor@4coders.com.br"  13194139534333 true ]) ← …new assert, SAME tx
@@ -1046,6 +1046,10 @@
   (let [db* (db)]
     (->> (d/datoms db* :eavt (d/entid db* victor))
          (map #(datom->vec db* %))))
+
+  (let [db* (d/history (db))]
+      (->> (d/datoms db* :eavt (d/entid db* victor))
+           (map #(datom->vec db* %))))
   ;; => the present-tense datoms for victor — email already swapped,
   ;;    exactly one :user/email datom. No hidden state anywhere.
 
@@ -1090,7 +1094,7 @@
               :in $ ?e ?r
               :where [?e :user/stars ?r ?tx ?op]]
             (d/history (db)) victor (repo (db) "clojure" "clojure"))
-       (sort-by first))
+       #_(sort-by first))
   ;; => ([13194139534322 true] [13194139534334 false])
   ;;    starred in §2's seed, un-starred just now. Two facts, zero
   ;;    DELETEs — "forgotten" is one more thing the db remembers.
@@ -1114,6 +1118,7 @@
 
   ;; Present tense: gone. No tombstone, no deleted_at column:
   (d/q '[:find ?e . :where [?e :user/name "spambot"]] (db))
+  (d/q '[:find ?e . :where [?e :user/name "spambot"]](d/history (db)))
   ;; => nil
 
   ;; History: remembered. The db never lies about what it once said:
@@ -1526,15 +1531,33 @@
 
   ;; That sugar is powered by the AVET index. See it raw:
   (->> (d/datoms (db) :avet :user/name)
-       (map (juxt :v :e)))
+       (map #_identity (juxt :v :e)))
   ;; => (["pithyless" 17592186045420] ["richhickey" 17592186045418]
   ;;     ["tonsky" 17592186045419] ["victor" 17592186045424])
   ;; Sorted by (A,V) ⇒ point lookups AND range scans:
-  (->> (d/index-range (db) :user/name "p" "u")   ;; names in [p,u)
+  (->> (d/index-range (db) :user/name "p" "z")   ;; names in [p,u)
        (map :v))
   ;; => ("pithyless" "richhickey" "tonsky")
   ;; SET = transact. DEL = retract. TTL = your cron + retract. Redis,
   ;; minus the second database to keep consistent.
+
+  ;; Another canonical KV workload: FEATURE FLAGS — key = flag name,
+  ;; value = on/off. (Speculative db via d/with, §4.4, so class data —
+  ;; and the replay table — stay untouched.)
+  (let [{db1 :db-after}
+        (d/with (db) [{:db/ident       :flag/name
+                       :db/valueType   :db.type/string
+                       :db/cardinality :db.cardinality/one
+                       :db/unique      :db.unique/identity}
+                      {:db/ident       :flag/on?
+                       :db/valueType   :db.type/boolean
+                       :db/cardinality :db.cardinality/one}])
+        {db2 :db-after}   ;; schema first, then data that uses it
+        (d/with db1 [{:flag/name "new-ui"    :flag/on? true}
+                     {:flag/name "dark-mode" :flag/on? false}])]
+    (:flag/on? (d/entity db2 [:flag/name "new-ui"])))
+  ;; => true        — a GET by key. Flip it later with CAS (§4.2):
+  ;;    [:db/cas [:flag/name "new-ui"] :flag/on? true false]
   )
 
 ;; ─── §6.2 · Shape: RELATIONAL rows (EAVT) ────────────────────────────
@@ -1569,7 +1592,7 @@
 
   ;; entity = row, attribute = column, query = SELECT:
   ;;
-  ;;   SELECT u.name, u.email, count(s.repo_id)
+  ;;   SELECT u.name user, u.email email, count(s.repo_id)  starred
   ;;   FROM users u JOIN stars s ON s.user_id = u.id
   ;;   GROUP BY u.id;
   (->> (d/q '[:find ?name ?email (count ?r)
@@ -1578,8 +1601,8 @@
                      [(get-else $ ?u :user/email "—") ?email]
                      [?u :user/stars ?r]]
             (db))
-       (sort-by :user)
-       print-table)
+       #_(sort-by :user)
+       #_print-table)
   ;;  | :user     | :email             | :starred |
   ;;  |-----------+--------------------+----------|
   ;;  | pithyless | —                  |        2 |
@@ -1594,6 +1617,16 @@
   ;; => all datoms for that E, contiguous on "disk" — that IS the row.
   ;; Difference from SQL: the row is a VIEW you asked for, not the
   ;; storage physics you're stuck with.
+
+  ;; The other relational classic: a LEADERBOARD — GROUP BY, ORDER BY
+  ;; count DESC, LIMIT n. Most-starred repos:
+  (->> (d/q '[:find ?slug (count ?u)
+              :where [?u :user/stars ?r]
+                     [?r :repo/slug ?slug]]
+            (db))
+       (sort-by second >)
+       (take 3))
+  ;; => (["clojure" 3] ["datascript" 1])
   )
 
 ;; ─── §6.3 · Shape: COLUMN store (AEVT) ───────────────────────────────
@@ -1629,17 +1662,34 @@
   ;; Warehouse question: language distribution across all repos —
   ;; touch ONE attribute, never load a row:
   (->> (d/datoms (db) :aevt :repo/language)
-       (map :v)
+       (map identity #_:v)
        frequencies)
   ;; => {"Clojure" 4, "Java" 1, "ClojureScript" 1}
   ;; AEVT physically clusters one attribute across all entities:
   ;; the definition of columnar. Same data, analytics-friendly order.
 
   ;; In query form (engine picks the index for you):
-  (d/q '[:find ?lang (count ?r)
-         :where [?r :repo/language ?lang]]
+  (d/q '[:find ?lang ?slug (count ?r)
+         :where [?r :repo/language ?lang]
+                [?r :repo/slug ?slug]]
        (db))
   ;; => [["Clojure" 4] ["ClojureScript" 1] ["Java" 1]]
+
+  ;; The warehouse nightly job: a DATA-QUALITY scan over ONE column —
+  ;; "which repos still lack a :repo/visibility?" Two column scans
+  ;; (slugs, visibilities), zero rows materialized:
+  (let [have (into #{} (map :e) (d/datoms (db) :aevt :repo/visibility))]
+    (->> (d/datoms (db) :aevt :repo/slug)
+         (remove #(have (:e %)))
+         (map :v)))
+
+  (let [have (into #{} (map :e) (d/datoms (db) :aevt :repo/language))]
+    (->> (d/datoms (db) :aevt :repo/slug)
+         #_(remove #(have (:e %)))
+         (map :v)))
+  ;; => ("clojure" "datascript" "datascript")
+  ;; Three repos missing the column — only victor's fork got one (§3).
+  ;; Same question as a query: (not [?r :repo/visibility _]).
   )
 
 ;; ─── §6.4 · Shape: DOCUMENT store (nested tx maps + pull) ────────────
@@ -1832,6 +1882,22 @@
   ;; Lucene, in-process, addressed from Datalog. NOTE: since adaptive
   ;; indexing, fulltext updates in the background — if this comes back
   ;; empty right after the transact, wait a beat and re-run.
+
+  ;; And the write side's classic: a PARTIAL UPDATE — MongoDB's $set.
+  ;; Transact ONLY the changed fields at the document's id; the rest of
+  ;; the tree (comments!) is untouched:
+  (let [i (d/q '[:find ?i .
+                 :where [?i :issue/title "Support tuple bindings in :find"]]
+               (db))
+        {db2 :db-after}
+        (d/with (db) [{:db/id i :issue/state :issue.state/closed}])]
+    (d/pull db2 '[:issue/title {:issue/state [:db/ident]}
+                  {:issue/comments [:comment/body]}]
+            i))
+  ;; => {:issue/title "Support tuple bindings in :find",
+  ;;     :issue/state {:db/ident :issue.state/closed},
+  ;;     :issue/comments [{:comment/body "PR incoming — same trick as Datomic?"}
+  ;;                      {:comment/body "Yes. Keep the API surface identical."}]}
   )
 
 ;; ─── §6.5 · Shape: GRAPH database (VAET + recursive rules) ───────────
@@ -1903,6 +1969,16 @@
                 (owner-name ?orig ?owner)]
        (db) rules (repo (db) "victor" "datascript"))
   ;; => ["pithyless" "tonsky"]     (fork of a fork ⇒ two ancestors)
+
+  ;; LinkedIn's bread and butter: 2ND-DEGREE CONNECTIONS — everyone
+  ;; reachable through the graph, minus your direct follows:
+  (d/q '[:find [?name ...]
+         :in $ % ?me
+         :where (follows ?me ?fof)
+                (not [?me :user/follows ?fof])
+                [?fof :user/name ?name]]
+       (db) rules [:user/name "victor"])
+  ;; => ["richhickey" "tonsky"]    (pithyless is 1st-degree: filtered)
 
 
 
@@ -1992,6 +2068,17 @@
   ;; New attributes accrete; old facts remain true and queryable.
   ;; Projections? That's what the four indexes ARE. You've been
   ;; running CQRS since §0 without ceremony.
+
+  ;; The audit question every regulated shop asks — "what EXACTLY
+  ;; changed in that transaction?" Answered from the log alone; no
+  ;; triggers, no audit tables, no CHANGELOG file:
+  (let [last-tx (d/t->tx (d/basis-t (db)))]
+    (->> (d/tx-range (d/log conn) last-tx (inc last-tx))
+         (mapcat :data)
+         (map #(datom->vec (db) %))))
+  ;; => ([...facts of the last tx...] [... :db/txInstant ... true])
+  ;; Straight after (goto! 52) that's slide 47's issue document; if you
+  ;; already ran §6.7 below, it's @tonsky's one-fact twitter tx.
   )
 
 ;; ─── §6.7 · Shape: SPARSE matrix / wide table ────────────────────────
@@ -2039,6 +2126,25 @@
        (db))
   ;; => #{["victor" "—"]    ["tonsky" "@tonsky"]
   ;;      ["pithyless" "—"] ["richhickey" "@richhickey"]}
+
+  ;; The case that made Bigtable: the E-COMMERCE CATALOG, where every
+  ;; product carries DIFFERENT attributes. Give ONE repo a one-off
+  ;; :repo/homepage (speculatively) — no ALTER TABLE, and nobody else
+  ;; stores a null for it:
+  (let [{db1 :db-after}
+        (d/with (db) [{:db/ident       :repo/homepage
+                       :db/valueType   :db.type/string
+                       :db/cardinality :db.cardinality/one}])
+        {db2 :db-after}   ;; schema first, then data that uses it
+        (d/with db1 [{:db/id (repo (db) "tonsky" "datascript")
+                      :repo/homepage "https://github.com/tonsky/datascript"}])]
+    (d/q '[:find ?slug ?hp
+           :where [?r :repo/slug ?slug]
+                  [(get-else $ ?r :repo/homepage "—") ?hp]]
+         db2))
+  ;; => #{["clojure" "—"] ["datascript" "—"]
+  ;;      ["datascript" "https://github.com/tonsky/datascript"]}
+  ;; (set semantics again: the two homepage-less forks collapse to one row)
   )
 
 ;; ═════════════════════════════════════════════════════════════════════
@@ -2102,7 +2208,10 @@
    49 [6 "Shape 4/7 · reverse refs, cascades, fulltext"]
    50 [6 "Shape 5/7 · VAET = graph database"]
    51 [6 "The mesh payoff — a recommender in five clauses"]
-   52 [6 "Shapes 6 & 7 · event log · sparse matrix"]})
+   52 [6 "Shapes 6 & 7 · event log · sparse matrix"]
+   53 [6 "Recap — same datoms, seven costumes"]
+   54 [6 "The whole class in one sentence"]
+   55 [6 "Go deeper — references & files"]})
 
 (def replay
   ;; slide → the WRITES that slide's own block performs. Kept in sync,
