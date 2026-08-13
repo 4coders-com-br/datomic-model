@@ -125,6 +125,12 @@
   ;;   * Network         → every EQL request/response (⇧/⇩ made visual)
   ;;   * Element picker  → click any DOM element → its component + props
   ;; Same facts, three lenses: REPL helpers, console stream, Inspect.
+
+  ;; THE PACKAGED ROBOT — the whole §3→§5 arc as a ~55s self-narrating
+  ;; demo (great for recordings). CLJS REPL:
+  ;;   (rad-class.showcase/run!)        ; or (run! 0.5) for half speed
+  ;; or straight from the devtools console:
+  ;;   rad_class.showcase.run_BANG_()
   )
 
 ;; ═════════════════════════════════════════════════════════════════════

@@ -6,6 +6,7 @@
     [com.fulcrologic.rad.application :as rad-app]
     [com.fulcrologic.rad.rendering.semantic-ui.semantic-ui-controls :as sui]
     [fulcro.inspect.tool :as inspect]
+    [rad-class.showcase]
     [rad-class.trace-client :as trace]
     [rad-class.ui :as ui]))
 
