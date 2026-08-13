@@ -5,6 +5,7 @@
     [com.fulcrologic.fulcro.routing.dynamic-routing :as dr]
     [com.fulcrologic.rad.application :as rad-app]
     [com.fulcrologic.rad.rendering.semantic-ui.semantic-ui-controls :as sui]
+    [fulcro.inspect.tool :as inspect]
     [rad-class.trace-client :as trace]
     [rad-class.ui :as ui]))
 
@@ -22,6 +23,7 @@
   (app/mount! app ui/Root "app"))
 
 (defn ^:export init []
+  (inspect/add-fulcro-inspect! app)   ; Fulcro Inspect (chrome devtools tab)
   (rad-app/install-ui-controls! app sui/all-controls)
   (trace/register! app)
   (app/mount! app ui/Root "app")

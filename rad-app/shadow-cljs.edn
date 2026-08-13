@@ -4,6 +4,5 @@
                    :output-dir "resources/public/js/main"
                    :asset-path "/js/main"
                    :modules    {:main {:init-fn rad-class.client/init}}
-                   :devtools   {:preloads   [com.fulcrologic.fulcro.inspect.preload
-                                             com.fulcrologic.fulcro.inspect.dom-picker-preload]
+                   :devtools   {:preloads   [com.fulcrologic.devtools.chrome-preload]
                                 :after-load rad-class.client/refresh}}}}

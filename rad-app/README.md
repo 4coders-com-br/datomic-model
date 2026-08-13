@@ -33,8 +33,10 @@ user=> (rad-class.seed/seed!)
 
 # Browser: http://localhost:3000  (keep the devtools console open)
 # Install the "Fulcro Inspect" Chrome extension: a Fulcro tab appears in
-# devtools with the client DB, transactions, EQL network log, and an
-# element picker. The build ships both inspect preloads.
+# devtools with the client DB, transactions, and EQL network log. The
+# build ships the devtools chrome-preload and the app installs itself
+# via fulcro.inspect.tool/add-fulcro-inspect! (client.cljs). If the tab
+# says "No app connected", reload the page with devtools already open.
 # Optional Terminal 3 — CLJS REPL into the browser:
 npx shadow-cljs cljs-repl main
 ```
