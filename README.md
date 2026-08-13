@@ -1,6 +1,6 @@
 # Datomic Classes
 
-Companion materials for three classes:
+Companion materials for four classes:
 
 - **One Database, Many Shapes** — a 2-hour, REPL-first class on domain
   modeling with Datomic datoms.
@@ -13,6 +13,12 @@ Companion materials for three classes:
   walks every surface of the Datomic Console: schema tree, query builder,
   entities, transactions, indexes, as-of/since/history, and data sources.
   Reuses the Production class infra (Postgres + Pro transactor).
+
+- **Fulcro RAD × Datomic — Attributes All The Way Down** — a 2-hour,
+  full-stack class on a scaffolded Fulcro RAD application: ~10 attribute
+  declarations generate the Datomic schema, Pathom resolvers, CRUD forms
+  and reports — with REPL probes tracing every request through
+  Read → Render → Edit/Add → Mutation → Transaction → DB.
 
 ## Files
 
@@ -65,6 +71,13 @@ Companion materials for three classes:
   Open http://localhost:8080/browse/ · storage **pg** · DB **store**.
   Chrome recommended. The Console URI has **no** database name — that is
   deliberate.
+
+### Fulcro RAD × Datomic — Attributes All The Way Down
+
+- `rad-app/` — a self-contained Fulcro RAD project (own `deps.edn`,
+  `shadow-cljs.edn`); see `rad-app/README.md` to run it. The 2-hour
+  guided walkthrough is `rad-app/src/main/rad_class/labs.clj` (§1–§7).
+  Uses `datomic:mem://` — no infra needed.
 
 ### Shared
 

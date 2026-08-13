@@ -1,0 +1,24 @@
+{:paths ["src/main" "resources"]
+ :deps  {org.clojure/clojure                {:mvn/version "1.12.0"}
+         ;; Datomic peer — same in-process library the other classes use
+         com.datomic/peer                   {:mvn/version "1.0.7705"}
+         org.slf4j/slf4j-nop                {:mvn/version "2.0.13"}
+         ;; Fulcro + RAD stack
+         com.fulcrologic/fulcro             {:mvn/version "3.9.5"}
+         com.fulcrologic/fulcro-rad         {:mvn/version "1.6.24"}
+         com.fulcrologic/fulcro-rad-datomic {:mvn/version "1.5.7"}
+         com.wsscode/pathom                 {:mvn/version "2.4.0"}
+         ;; web server
+         http-kit/http-kit                  {:mvn/version "2.8.0"}
+         ring/ring-core                     {:mvn/version "1.12.2"}
+         com.taoensso/timbre                {:mvn/version "6.5.0"}}
+ :aliases
+ {;; Everything needed to develop: CLJS compiler, shadow-cljs, UI controls.
+  :dev  {:extra-paths ["src/dev"]
+         :extra-deps  {org.clojure/clojurescript              {:mvn/version "1.11.132"}
+                       thheller/shadow-cljs                   {:mvn/version "2.28.23"}
+                       binaryage/devtools                     {:mvn/version "1.0.7"}
+                       com.fulcrologic/fulcro-rad-semantic-ui {:mvn/version "1.4.8"}}}
+  ;; Server-side nREPL — the CLJ half of the class.
+  :repl {:extra-deps {nrepl/nrepl {:mvn/version "1.7.0"}}
+         :main-opts  ["-m" "nrepl.cmdline" "--interactive"]}}}
