@@ -74,9 +74,12 @@ Companion materials for four classes:
 
 ### Fulcro RAD × Datomic — Attributes All The Way Down
 
+- `fulcro-rad-datomic-deck.md` - the 2-hour slide deck, in markdown
+  (theory + diagrams; REPL work referenced via ⚑ waypoints rather than
+  slide-by-slide, so you can move between deck and REPL loosely).
 - `rad-app/` — a self-contained Fulcro RAD project (own `deps.edn`,
-  `shadow-cljs.edn`); see `rad-app/README.md` to run it. The 2-hour
-  guided walkthrough is `rad-app/src/main/rad_class/labs.clj` (§1–§7).
+  `shadow-cljs.edn`); see `rad-app/README.md` to run it. The guided
+  REPL companion is `rad-app/src/main/rad_class/labs.clj` (§1–§7).
   Uses `datomic:mem://` — no infra needed.
 
 ### Shared

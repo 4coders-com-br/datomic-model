@@ -36,8 +36,10 @@ user=> (rad-class.seed/seed!)
 npx shadow-cljs cljs-repl main
 ```
 
-Then drive the class from `src/main/rad_class/labs.clj` (§1–§7, timed
-for 2 hours, everything in `(comment ...)` blocks).
+The slide deck is `../fulcro-rad-datomic-deck.md` (theory + diagrams,
+with ⚑ waypoints into the labs). The REPL companion is
+`src/main/rad_class/labs.clj` (§1–§7, timed for 2 hours, everything in
+`(comment ...)` blocks); the two are loosely coupled by design.
 
 ## Layout
 
