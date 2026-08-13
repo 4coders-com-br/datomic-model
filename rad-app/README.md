@@ -32,14 +32,21 @@ user=> (rad-class.server/start!)     ; writes schema, starts :3000
 user=> (rad-class.seed/seed!)
 
 # Browser: http://localhost:3000  (keep the devtools console open)
+# Install the "Fulcro Inspect" Chrome extension: a Fulcro tab appears in
+# devtools with the client DB, transactions, EQL network log, and an
+# element picker. The build ships both inspect preloads.
 # Optional Terminal 3 — CLJS REPL into the browser:
 npx shadow-cljs cljs-repl main
 ```
 
 The slide deck is `../fulcro-rad-datomic-deck.md` (theory + diagrams,
 with ⚑ waypoints into the labs). The REPL companion is
-`src/main/rad_class/labs.clj` (§1–§7, timed for 2 hours, everything in
-`(comment ...)` blocks); the two are loosely coupled by design.
+`src/main/rad_class/labs.clj` (§1–§8, timed for 2 hours, everything in
+`(comment ...)` blocks); the two are loosely coupled by design. §8 is
+the capstone: growing the Datomic model of the live, populated database
+(new scalar attribute, then a to-many attribute) with no migration
+script — mixed-generation data, `missing?` queries, and `as-of` across
+the migration boundary.
 
 ## Layout
 

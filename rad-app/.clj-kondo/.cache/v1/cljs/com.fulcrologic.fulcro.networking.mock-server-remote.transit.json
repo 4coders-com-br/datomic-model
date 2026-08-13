@@ -1,0 +1,1 @@
+["^ ","~$mock-http-server",["^ ","~:row",9,"~:col",1,"~:fixed-arities",["~#set",[1]],"~:name","^0","~:ns","~$com.fulcrologic.fulcro.networking.mock-server-remote","~:top-ns","^7","~:arities",["^ ","~i1",["^ ","~:ret","~:nilable/map"]],"~:type","~:fn"],"~:filename","com/fulcrologic/fulcro/networking/mock_server_remote.cljs"]

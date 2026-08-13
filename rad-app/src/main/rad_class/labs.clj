@@ -8,6 +8,10 @@
 
      READ → RENDER → EDIT/ADD → MUTATION → TRANSACTION → DB
 
+   …then closes (§8) on what the datomic model buys you long-term:
+   INCREMENTAL SCHEMA GROWTH — evolving the model of a live, populated
+   database, twice, without a migration script.
+
    ── Before class (10 min, from rad-app/) ───────────────────────────
    Terminal 1 — frontend:   npm install && npx shadow-cljs watch main
    Terminal 2 — backend:    clj -M:dev:repl
@@ -15,6 +19,8 @@
      user=> (rad-class.server/start!)
      user=> (rad-class.seed/seed!)
    Browser — http://localhost:3000 with the devtools console OPEN.
+     (Install the \"Fulcro Inspect\" Chrome extension beforehand: a
+      Fulcro tab appears in devtools — DB / Transactions / Network.)
    Optional Terminal 3 — CLJS REPL into the browser:
      npx shadow-cljs cljs-repl main        ; or nREPL on port 9001
 
@@ -110,6 +116,15 @@
   ;; CLJS — watch React work; then click around and read the console:
   ;; (rad-class.trace-client/log-renders!)
   ;; (rad-class.trace-client/quiet-renders!)
+
+  ;; FULCRO INSPECT — the graphical twin of these probes. Open the
+  ;; Fulcro tab in Chrome devtools:
+  ;;   * DB tab          → the same normalized tables as (db), browsable
+  ;;   * DB Explorer     → follow idents by clicking refs
+  ;;   * Transactions    → every UI tx, with before/after db diffs
+  ;;   * Network         → every EQL request/response (⇧/⇩ made visual)
+  ;;   * Element picker  → click any DOM element → its component + props
+  ;; Same facts, three lenses: REPL helpers, console stream, Inspect.
   )
 
 ;; ═════════════════════════════════════════════════════════════════════
@@ -216,6 +231,102 @@
   ;;   the React props → the client db ident → the EQL join →
   ;;   the form delta → the :db/add → the datom on disk.
   ;; One identity, six representations, zero glue code written by us.
+  )
+
+;; ═════════════════════════════════════════════════════════════════════
+;; §8 · 1:32–1:52 · EVOLUTION — growing the model of a LIVE database
+;; ═════════════════════════════════════════════════════════════════════
+;; The payoff section. The database is running and populated; we will
+;; change the domain model TWICE without stopping it, without a
+;; migration script, and without touching a single existing row.
+;;
+;; Datomic's rule: schema GROWS. New attributes are just transactions;
+;; existing datoms are never rewritten. RAD's rule: the attribute
+;; registry IS the migration plan — (start!) transacts whatever the
+;; live schema is missing.
+
+(comment
+  ;; Snapshot the pre-growth basis — we'll time-travel back to it later:
+  (def t-v1 (d/basis-t (d/db (server/connection))))
+
+  ;; ── GROWTH 1: a new scalar attribute ─────────────────────────────
+  ;; EDIT model/item.cljc — add after `category`:
+  ;;
+  ;;   (defattr in-stock? :item/in-stock? :boolean
+  ;;     {ao/identities #{:item/id}
+  ;;      ao/schema     :production})
+  ;;
+  ;; …add `in-stock?` to the `attributes` vector, and (optionally, for
+  ;; the UI) to `fo/attributes` of ItemForm and `ro/columns` of ItemList
+  ;; in ui.cljs (shadow watch hot-reloads the form).
+  ;;
+  ;; Then reload the model and re-run start! — SAME JVM, SAME mem db:
+  (require 'rad-class.model.item :reload)
+  (require 'rad-class.model :reload)
+  (server/stop!)
+  (server/start!)
+  ;; Watch the REPL: the datom stream prints the schema growth itself —
+  ;;   [72 :db/ident :item/in-stock? …]  ← schema is data, transacted
+
+  ;; ── GROWTH 2: a to-many attribute ────────────────────────────────
+  ;; EDIT model/item.cljc again — cardinality is just another option:
+  ;;
+  ;;   (defattr tags :item/tags :string
+  ;;     {ao/identities #{:item/id}
+  ;;      ao/cardinality :many
+  ;;      ao/schema      :production})
+  ;;
+  ;; …add `tags` to `attributes`, then reload + restart as above.
+  ;; No join table appeared. A to-many value is just several datoms
+  ;; sharing the same e and a.
+
+  ;; ── Verify the growth, interrogate the consequences ──────────────
+  (let [db (d/db (server/connection))]
+    (sort (d/q '[:find [?i ...]
+                 :where [?a :db/ident ?i]
+                        [(namespace ?i) ?ns] [(= ?ns "item")]] db)))
+  ;; => (:item/category :item/id :item/in-stock? … :item/tags)
+
+  ;; All pre-growth rows survived, untouched:
+  (d/q '[:find (count ?e) . :where [?e :item/id]]
+    (d/db (server/connection)))
+
+  ;; Give ONE item v2 data — mixed generations now coexist:
+  @(d/transact (server/connection)
+     [{:db/id          [:item/id (d/q '[:find ?id . :where
+                                        [?e :item/name "Hammer"]
+                                        [?e :item/id ?id]]
+                                   (d/db (server/connection)))]
+       :item/in-stock? true
+       :item/tags      ["steel" "hand-tool"]}])
+
+  ;; ABSENCE, NOT NULL. Old rows don't have a null in a new column —
+  ;; they simply have no datom. Three ways to see it:
+  (server/q [{:item/all-items [:item/name :item/in-stock? :item/tags]}])
+  ;; => Hammer has the keys; the other three simply LACK them.
+
+  (d/q '[:find [?n ...]
+         :where [?e :item/name ?n]
+                [(missing? $ ?e :item/in-stock?)]]
+    (d/db (server/connection)))
+  ;; => the not-yet-migrated generation, found by a query — your
+  ;;    "backfill TODO list" is a where-clause, not a table scan.
+
+  ;; TIME-TRAVEL ACROSS THE MIGRATION. Before t-v1 the attribute did
+  ;; not exist — not empty: nonexistent. The past is still queryable
+  ;; under its own schema:
+  (boolean
+    (d/q '[:find ?a . :where [?a :db/ident :item/in-stock?]]
+      (d/as-of (d/db (server/connection)) t-v1)))
+  ;; => false
+
+  ;; Wrap-up talking track:
+  ;;  * growth = one edit to the attribute registry + restart
+  ;;  * no ALTER TABLE, no NULL backfill, no downtime, no script
+  ;;  * old data readable forever; new queries degrade gracefully
+  ;;  * what ISN'T free: value-type changes (new attr + deprecate),
+  ;;    renames (alter :db/ident — old name keeps resolving!),
+  ;;    uniqueness additions (need clean data first).
   )
 
 ;; ═════════════════════════════════════════════════════════════════════

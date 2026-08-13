@@ -76,10 +76,13 @@ Companion materials for four classes:
 
 - `fulcro-rad-datomic-deck.md` - the 2-hour slide deck, in markdown
   (theory + diagrams; REPL work referenced via ⚑ waypoints rather than
-  slide-by-slide, so you can move between deck and REPL loosely).
+  slide-by-slide, so you can move between deck and REPL loosely). The
+  closing part grows the Datomic model of the live database — two
+  incremental schema-growth examples, no migration script.
 - `rad-app/` — a self-contained Fulcro RAD project (own `deps.edn`,
   `shadow-cljs.edn`); see `rad-app/README.md` to run it. The guided
-  REPL companion is `rad-app/src/main/rad_class/labs.clj` (§1–§7).
+  REPL companion is `rad-app/src/main/rad_class/labs.clj` (§1–§8).
+  Fulcro Inspect preloads are wired into the dev build.
   Uses `datomic:mem://` — no infra needed.
 
 ### Shared
