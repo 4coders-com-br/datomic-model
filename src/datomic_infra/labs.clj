@@ -48,6 +48,7 @@
 
   ;; LAB — your first database.
   (d/create-database (uri "inventory"))
+  (d/create-database (uri "payments"))
   ;; => true          (false means it already existed — it's idempotent)
 
   (def conn (d/connect (uri "inventory")))

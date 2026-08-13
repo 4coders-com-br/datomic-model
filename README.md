@@ -1,6 +1,6 @@
 # Datomic Classes
 
-Companion materials for two classes:
+Companion materials for three classes:
 
 - **One Database, Many Shapes** — a 2-hour, REPL-first class on domain
   modeling with Datomic datoms.
@@ -9,6 +9,10 @@ Companion materials for two classes:
   and persistence modes, the physical cache tiers, and admin operations.
   Labs run Datomic Pro against PostgreSQL in Docker; Datomic Cloud and
   Datomic Local are covered by comparison.
+- **Datomic Console — Wall to Wall** — a 2-hour, Console-first class that
+  walks every surface of the Datomic Console: schema tree, query builder,
+  entities, transactions, indexes, as-of/since/history, and data sources.
+  Reuses the Production class infra (Postgres + Pro transactor).
 
 ## Files
 
@@ -39,6 +43,29 @@ Companion materials for two classes:
 - `infra/` - `docker-compose.yml` (PostgreSQL, plus memcached for session
   3), a transactor properties file, and setup instructions.
 
+### Datomic Console — Wall to Wall
+
+- `datomic-console.pptx` - the 2-hour, Console-first slide deck (55 slides).
+- `datomic-console-deck.js` - source; `node datomic-console-deck.js` regenerates
+  the pptx (requires `npm install pptxgenjs`).
+- `src/datomic_console/labs.clj` - seed + verifier companion. Sections
+  (`§0`–`§10`) match the deck; every `◆ CONSOLE` slide has click paths and
+  REPL checks here. Run `(datomic-console.labs/seed!)` once before class,
+  then spend the hour in the browser.
+
+  ```sh
+  docker compose -f infra/docker-compose.yml up -d
+  $DATOMIC/bin/transactor infra/pg-transactor.properties
+  clj -M:infra:repl
+  # (require 'datomic-console.labs) (datomic-console.labs/seed!)
+  $DATOMIC/bin/console -p 8080 \
+    pg "datomic:sql://?jdbc:postgresql://localhost:5432/datomic?user=datomic&password=datomic"
+  ```
+
+  Open http://localhost:8080/browse/ · storage **pg** · DB **store**.
+  Chrome recommended. The Console URI has **no** database name — that is
+  deliberate.
+
 ### Shared
 
 - `deck_shell.py` + `deck_builder.py` - pptx packaging for both decks:
@@ -61,6 +88,11 @@ thing: Docker (for PostgreSQL and memcached) and a Datomic Pro distribution
 unzipped locally, for `bin/transactor` and `bin/datomic`. Datomic Pro has
 been Apache-2.0 licensed and free since 2023 — no account, no license key.
 See `infra/README.md`.
+
+**Datomic Console — Wall to Wall** needs the same infra as Production
+(Docker Postgres + Pro transactor), plus `bin/console` from the Pro
+distribution. Console cannot attach to `datomic:mem://` — it is a separate
+process that talks to storage.
 
 ## Start The REPL
 
