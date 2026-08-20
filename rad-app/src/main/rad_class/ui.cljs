@@ -45,7 +45,7 @@
 
 (form/defsc-form ItemForm [this props]
   {fo/id            item/id
-   fo/attributes    [item/item-name item/price item/quantity item/category]
+   fo/attributes    [item/item-name item/price item/quantity item/category item/in-stock? item/tags ]
    fo/title         "Item"
    fo/route-prefix  "item"
    fo/field-styles  {:item/category :pick-one}
@@ -63,7 +63,7 @@
   {ro/title            "Inventory Items"
    ro/source-attribute :item/all-items
    ro/row-pk           item/id
-   ro/columns          [item/item-name item/price item/quantity]
+   ro/columns          [item/item-name item/price item/quantity item/in-stock?]
    ro/form-links       {:item/name ItemForm}
    ro/controls         {::new {:type   :button
                                :label  "New Item"
@@ -100,7 +100,7 @@
    :initial-state {:router {}}}
   (dom/div
     (dom/div :.ui.top.attached.menu
-      (dom/div :.header.item "RAD Class")
+      (dom/div :.header.item "RAD CLASS")
       (dom/a :.item {:onClick #(rroute/route-to! this ItemList {})} "Items")
       (dom/a :.item {:onClick #(rroute/route-to! this CategoryList {})} "Categories"))
     (dom/div :.ui.bottom.attached.segment

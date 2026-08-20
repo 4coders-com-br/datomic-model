@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="JAVA_MODULE" version="4">
+  <component name="NewModuleRootManager" inherit-compiler-output="true">
+    <exclude-output />
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/resources" type="java-resource" />
+      <sourceFolder url="file://$MODULE_DIR$/src/main" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/test" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/src/dev" isTestSource="false" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+    <orderEntry type="library" name="Deps: borkdude/dynaload:0.3.5" level="project" />
+    <orderEntry type="library" name="Deps: borkdude/edamame:1.4.32" level="project" />
+    <orderEntry type="library" name="Deps: camel-snake-kebab/camel-snake-kebab:0.4.0" level="project" />
+    <orderEntry type="library" name="Deps: com.cognitect/anomalies:0.1.12" level="project" />
+    <orderEntry type="library" name="Deps: com.cognitect/caster:1.0.45" level="project" />
+    <orderEntry type="library" name="Deps: com.cognitect/transit-clj:1.0.333" level="project" />
+    <orderEntry type="library" name="Deps: com.cognitect/transit-cljs:0.8.280" level="project" />
+    <orderEntry type="library" name="Deps: com.cognitect/transit-java:1.0.371" level="project" />
+    <orderEntry type="library" name="Deps: com.cognitect/transit-js:0.8.874" level="project" />
+    <orderEntry type="library" name="Deps: com.datomic/datomic-lucene-core:3.3.0" level="project" />
+    <orderEntry type="library" name="Deps: com.datomic/io-stats:1.0.14" level="project" />
+    <orderEntry type="library" name="Deps: com.datomic/java-io:0.1.38" level="project" />
+    <orderEntry type="library" name="Deps: com.datomic/memcache-asg-java-client:1.1.0.36" level="project" />
+    <orderEntry type="library" name="Deps: com.datomic/peer:1.0.7705" level="project" />
+    <orderEntry type="library" name="Deps: com.datomic/query-stats:1.0.17" level="project" />
+    <orderEntry type="library" name="Deps: com.datomic/query-support:0.8.31" level="project" />
+    <orderEntry type="library" name="Deps: com.fasterxml.jackson.core/jackson-core:2.14.2" level="project" />
+    <orderEntry type="library" name="Deps: com.fulcrologic/fulcro-devtools-remote:0.2.8" level="project" />
+    <orderEntry type="library" name="Deps: com.fulcrologic/fulcro-i18n:1.1.2" level="project" />
+    <orderEntry type="library" name="Deps: com.fulcrologic/fulcro-inspect:1.0.5" level="project" />
+    <orderEntry type="library" name="Deps: com.fulcrologic/fulcro-rad-datomic:1.5.7" level="project" />
+    <orderEntry type="library" name="Deps: com.fulcrologic/fulcro-rad:1.6.24" level="project" />
+    <orderEntry type="library" name="Deps: com.fulcrologic/fulcro:3.9.5" level="project" />
+    <orderEntry type="library" name="Deps: com.fulcrologic/guardrails:1.3.1" level="project" />
+    <orderEntry type="library" name="Deps: com.github.ben-manes.caffeine/caffeine:3.2.4" level="project" />
+    <orderEntry type="library" name="Deps: com.google.errorprone/error_prone_annotations:2.49.0" level="project" />
+    <orderEntry type="library" name="Deps: com.google.javascript/closure-compiler:v20250820" level="project" />
+    <orderEntry type="library" name="Deps: com.googlecode.json-simple/json-simple:1.1.1" level="project" />
+    <orderEntry type="library" name="Deps: com.h2database/h2:2.1.214" level="project" />
+    <orderEntry type="library" name="Deps: com.hierynomus/asn-one:0.6.0" level="project" />
+    <orderEntry type="library" name="Deps: com.taoensso/encore:3.133.0" level="project" />
+    <orderEntry type="library" name="Deps: com.taoensso/sente:1.20.0" level="project" />
+    <orderEntry type="library" name="Deps: com.taoensso/timbre:6.5.0" level="project" />
+    <orderEntry type="library" name="Deps: com.taoensso/truss:1.12.0" level="project" />
+    <orderEntry type="library" name="Deps: com.widdindustries/cljc.java-time:0.1.22" level="project" />
+    <orderEntry type="library" name="Deps: com.widdindustries/cljs.java-time:0.1.20" level="project" />
+    <orderEntry type="library" name="Deps: com.wsscode/async:2021.01.14" level="project" />
+    <orderEntry type="library" name="Deps: com.wsscode/pathom:2.4.0" level="project" />
+    <orderEntry type="library" name="Deps: com.wsscode/spec-inspec:1.0.0-alpha2" level="project" />
+    <orderEntry type="library" name="Deps: com.yetanalytics/colossal-squuid:0.1.5" level="project" />
+    <orderEntry type="library" name="Deps: commons-beanutils/commons-beanutils:1.11.0" level="project" />
+    <orderEntry type="library" name="Deps: commons-codec/commons-codec:1.22.0" level="project" />
+    <orderEntry type="library" name="Deps: commons-collections/commons-collections:3.2.2" level="project" />
+    <orderEntry type="library" name="Deps: commons-io/commons-io:2.22.0" level="project" />
+    <orderEntry type="library" name="Deps: crypto-equality/crypto-equality:1.0.1" level="project" />
+    <orderEntry type="library" name="Deps: crypto-random/crypto-random:1.2.1" level="project" />
+    <orderEntry type="library" name="Deps: de.dentrassi.crypto/pem-keystore:3.0.0" level="project" />
+    <orderEntry type="library" name="Deps: edn-query-language/eql:2025.09.27" level="project" />
+    <orderEntry type="library" name="Deps: expound/expound:0.9.0" level="project" />
+    <orderEntry type="library" name="Deps: fipp/fipp:0.6.29" level="project" />
+    <orderEntry type="library" name="Deps: http-kit/http-kit:2.8.0" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-buffer:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-codec-http:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-codec-socks:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-codec:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-common:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-handler-proxy:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-handler:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-resolver:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-transport-classes-epoll:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-transport-classes-kqueue:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-transport-native-epoll$linux-x86_64:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-transport-native-kqueue$osx-x86_64:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-transport-native-unix-common:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: io.netty/netty-transport:4.1.131.Final" level="project" />
+    <orderEntry type="library" name="Deps: javax.activation/javax.activation-api:1.2.0" level="project" />
+    <orderEntry type="library" name="Deps: javax.xml.bind/jaxb-api:2.4.0-b180830.0359" level="project" />
+    <orderEntry type="library" name="Deps: metosin/malli:0.19.2" level="project" />
+    <orderEntry type="library" name="Deps: mvxcvi/arrangement:2.1.0" level="project" />
+    <orderEntry type="library" name="Deps: org.apache.artemis/artemis-commons:2.53.0" level="project" />
+    <orderEntry type="library" name="Deps: org.apache.artemis/artemis-core-client:2.53.0" level="project" />
+    <orderEntry type="library" name="Deps: org.apache.commons/commons-fileupload2-core:2.0.0-M1" level="project" />
+    <orderEntry type="library" name="Deps: org.apache.httpcomponents/httpclient:4.5.13" level="project" />
+    <orderEntry type="library" name="Deps: org.apache.httpcomponents/httpcore:4.4.13" level="project" />
+    <orderEntry type="library" name="Deps: org.apache.tomcat/tomcat-jdbc:7.0.109" level="project" />
+    <orderEntry type="library" name="Deps: org.apache.tomcat/tomcat-juli:7.0.109" level="project" />
+    <orderEntry type="library" name="Deps: org.clj-commons/pretty:2.2.1" level="project" />
+    <orderEntry type="library" name="Deps: org.clojars.favila/datomock:0.2.2-favila1" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/clojure:1.12.0" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/clojurescript:1.12.145" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/core.async:1.9.865" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/core.cache:1.1.234" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/core.memoize:1.1.266" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/core.rrb-vector:0.1.2" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/core.specs.alpha:0.4.74" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/data.json:0.2.6" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/data.priority-map:1.2.0" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/google-closure-library-third-party:0.0-20250515-f04e4c0e" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/google-closure-library:0.0-20250515-f04e4c0e" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/spec.alpha:0.5.238" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/test.check:1.1.1" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/tools.analyzer.jvm:1.3.3" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/tools.analyzer:1.2.0" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/tools.cli:1.0.219" level="project" />
+    <orderEntry type="library" name="Deps: org.clojure/tools.reader:1.5.2" level="project" />
+    <orderEntry type="library" name="Deps: org.codehaus.janino/commons-compiler-jdk:3.1.12" level="project" />
+    <orderEntry type="library" name="Deps: org.codehaus.janino/commons-compiler:3.1.12" level="project" />
+    <orderEntry type="library" name="Deps: org.fressian/fressian:0.6.8" level="project" />
+    <orderEntry type="library" name="Deps: org.java-websocket/Java-WebSocket:1.6.0" level="project" />
+    <orderEntry type="library" name="Deps: org.javassist/javassist:3.18.1-GA" level="project" />
+    <orderEntry type="library" name="Deps: org.jspecify/jspecify:1.0.0" level="project" />
+    <orderEntry type="library" name="Deps: org.msgpack/msgpack:0.6.12" level="project" />
+    <orderEntry type="library" name="Deps: org.ow2.asm/asm:9.2" level="project" />
+    <orderEntry type="library" name="Deps: org.reactivestreams/reactive-streams:1.0.4" level="project" />
+    <orderEntry type="library" name="Deps: org.ring-clojure/ring-core-protocols:1.12.2" level="project" />
+    <orderEntry type="library" name="Deps: org.ring-clojure/ring-websocket-protocols:1.12.2" level="project" />
+    <orderEntry type="library" name="Deps: org.slf4j/jcl-over-slf4j:2.0.17" level="project" />
+    <orderEntry type="library" name="Deps: org.slf4j/jul-to-slf4j:2.0.17" level="project" />
+    <orderEntry type="library" name="Deps: org.slf4j/log4j-over-slf4j:2.0.17" level="project" />
+    <orderEntry type="library" name="Deps: org.slf4j/slf4j-api:2.0.17" level="project" />
+    <orderEntry type="library" name="Deps: org.slf4j/slf4j-nop:2.0.13" level="project" />
+    <orderEntry type="library" name="Deps: potemkin/potemkin:0.4.9" level="project" />
+    <orderEntry type="library" name="Deps: riddley/riddley:0.1.12" level="project" />
+    <orderEntry type="library" name="Deps: ring/ring-codec:1.2.0" level="project" />
+    <orderEntry type="library" name="Deps: ring/ring-core:1.12.2" level="project" />
+    <orderEntry type="library" name="Deps: software.amazon.awssdk/annotations:2.31.45" level="project" />
+    <orderEntry type="library" name="Deps: software.amazon.awssdk/metrics-spi:2.31.45" level="project" />
+    <orderEntry type="library" name="Deps: software.amazon.awssdk/utils:2.31.45" level="project" />
+  </component>
+</module>

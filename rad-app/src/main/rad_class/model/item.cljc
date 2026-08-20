@@ -30,6 +30,15 @@
    ao/identities  #{:item/id}
    ao/schema      :production})
 
+(defattr in-stock? :item/in-stock? :boolean
+  {ao/identities #{:item/id}
+   ao/schema     :production})
+
+(defattr tags :item/tags :string
+  {ao/identities #{:item/id}
+   ao/cardinality :many          ; ← the only new idea
+   ao/schema      :production})
+
 (defattr all-items :item/all-items :ref
   {ao/target    :item/id
    ao/pc-output [{:item/all-items [:item/id]}]
@@ -41,4 +50,4 @@
                    (d/q '[:find [?id ...] :where [_ :item/id ?id]] db))})
         :cljs nil))})
 
-(def attributes [id item-name price quantity category all-items])
+(def attributes [id item-name price quantity category  in-stock? all-items])
