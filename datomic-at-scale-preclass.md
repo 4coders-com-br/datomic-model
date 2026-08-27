@@ -1,7 +1,7 @@
 # Datomic at Scale — before the class
 
-**2 hours, plus a 45-minute exercise afterwards.** REPL-first: you will
-be measuring things on your own machine, not watching slides.
+**2 hours.** REPL-first: you will be measuring things on your own
+machine, not watching slides.
 
 ## What it covers
 
@@ -41,9 +41,9 @@ true
 :datomic-ready
 ```
 
-If you see that, you are set for the class and for the whole exercise
-afterwards. Both run on `datomic:mem://` — no Docker, no transactor, no
-Datomic distribution required.
+If you see that, you are set for the class. The `[MEM]` labs run on
+`datomic:mem://` — no Docker, no transactor, no Datomic distribution
+required.
 
 ## Optional: the two hands-on infrastructure labs
 
@@ -69,5 +69,4 @@ are more useful with a real workload to hold them against.
 |---|---|
 | `datomic-at-scale-deck.md` | the deck |
 | `src/datomic_ops/labs.clj` | labs §0–§6, referenced from the deck |
-| `src/datomic_ops/exercises.clj` | the exercise, after the break |
 | `infra/HA.md` | two-transactor setup, for the `[PRO]` labs |

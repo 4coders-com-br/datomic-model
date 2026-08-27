@@ -676,6 +676,5 @@
 ;; WHERE TO GO NEXT
 ;; ═════════════════════════════════════════════════════════════════════
 ;;
-;;   src/datomic_ops/exercises.clj   the incident drill (after the break)
 ;;   src/datomic_infra/labs.clj      the four-session Production class
 ;;   infra/HA.md                     two-transactor setup for §2

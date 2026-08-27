@@ -1,7 +1,7 @@
 # Datomic at Scale
 ## Operations, Parallelism and the Cost of a Read
 
-**A 2-hour class, plus a 45-minute exercise after the break.**
+**A 2-hour class.**
 
 The class covers how a Datomic system behaves in production: what each
 component does when it fails, how failover works, what a read costs at
@@ -20,13 +20,12 @@ how to deploy peers.
 >
 > **[MEM] and [PRO].** Labs marked **[MEM]** run on `datomic:mem://`
 > with nothing installed. Labs marked **[PRO]** need Postgres, one or
-> two transactors, and `$DATOMIC` — see `infra/HA.md`. The exercise
-> after the break is entirely **[MEM]**, so it does not depend on what
-> each laptop has set up.
+> two transactors, and `$DATOMIC` — see `infra/HA.md`; they are
+> demonstrated from the front, so no laptop is blocked on them.
 
 ---
 
-## Agenda (2:00 + exercise)
+## Agenda (2:00)
 
 | Time | Section | Question |
 |------|---------|----------|
@@ -37,10 +36,9 @@ how to deploy peers.
 | 1:12 | **Parallelism** | what scales, and what does not? |
 | 1:38 | **Settings & signals** | which knob, and what does it affect? |
 | 1:52 | **Deployment** | how are peers shipped? |
-| 2:00 | → **The Incident** (E1–E4) | ~45 min, continues past the hour |
 
 Setup: `infra/HA.md` for the live §2 lab. Otherwise `clj -M:repl`
-covers the `[MEM]` labs and the whole exercise.
+covers every `[MEM]` lab.
 
 ---
 
@@ -542,34 +540,6 @@ upgrade and an outage are indistinguishable.
 
 The settings in Part V are lookups; this table is the model they
 operate on.
-
----
-
-# → The Incident
-
-**`src/datomic_ops/exercises.clj` · ~45 minutes · continues past the hour**
-
-```clojure
-clj -M:repl
-(require 'datomic-ops.exercises)
-(datomic-ops.exercises/start!)
-;; => [:incident :ready :basis-t 61013]
-```
-
-The readings service was healthy at 08:00 and unusable at 09:10. The
-database and the REPL are the available evidence.
-
-| | | |
-|---|---|---|
-| **E1** | ~8 min | **Read the evidence** — the log as an audit trail |
-| **E2** | ~10 min | **Fix the writer** — transaction shape |
-| **E3** | ~12 min | **Fix the reader** — slice the index across cores |
-| **E4** | ~15 min | **Ship the fix** — warm, sync, rollout order |
-
-Fill-the-gaps (`___`), solutions at the bottom of the file. Everything
-runs on `datomic:mem://`, so no Docker, transactor or `$DATOMIC` is
-needed. Where an exercise checks a duration it checks a ratio or a
-boolean rather than a millisecond count.
 
 ---
 

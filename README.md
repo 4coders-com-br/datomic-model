@@ -14,9 +14,9 @@ Companion materials for five classes:
   entities, transactions, indexes, as-of/since/history, and data sources.
   Reuses the Production class infra (Postgres + Pro transactor).
 
-- **Datomic at Scale** — a 2-hour class on operating Datomic, plus a
-  45-minute exercise after the break: high availability and transactor
-  failover, the cache tiers and the cost of a cold read, what
+- **Datomic at Scale** — a 2-hour class on operating Datomic: high
+  availability and transactor failover, the cache tiers and the cost of
+  a cold read, what
   parallelism means on the write path versus the read path, the
   production settings and what each one affects, and how peers are
   deployed. Continues from *Datomic in Production*.
@@ -98,18 +98,11 @@ Companion materials for five classes:
   tagged **[MEM]** (runs on `datomic:mem://`, nothing installed — these
   are machine-verified) or **[PRO]** (needs Postgres, a transactor or
   two, and `$DATOMIC`).
-- `src/datomic_ops/exercises.clj` - **The Incident**, the fill-the-gaps
-  exercise for after the break (E1–E4, ~45 min): read the log as an
-  audit trail, fix a badly shaped writer, parallelise a reader by
-  slicing the index, then deploy the change. Eval
-  `(datomic-ops.exercises/start!)` to begin; solutions at the bottom of
-  the file. Entirely in-memory, so it does not depend on what each
-  laptop has installed.
 - `infra/HA.md` + `infra/pg-transactor-standby.properties` - the second
   transactor, for the live failover in §2.
 
   ```sh
-  clj -M:repl                    # enough for every [MEM] lab and the drill
+  clj -M:repl                    # enough for every [MEM] lab
   clj -M:infra:repl              # adds the JDBC driver, for the [PRO] labs
   ```
 
@@ -149,9 +142,8 @@ unzipped locally, for `bin/transactor` and `bin/datomic`. Datomic Pro has
 been Apache-2.0 licensed and free since 2023 — no account, no license key.
 See `infra/README.md`.
 
-**Datomic at Scale** runs its `[MEM]` labs and the whole post-break
-drill on `datomic:mem://`, so `clj -M:repl` is enough to follow most of
-it. The `[PRO]` labs — valcache, the deploy stampede, and the live
+**Datomic at Scale** runs its `[MEM]` labs on `datomic:mem://`, so
+`clj -M:repl` is enough to follow most of it. The `[PRO]` labs — valcache, the deploy stampede, and the live
 transactor failover — need the Production class's infrastructure plus a
 second transactor; see `infra/HA.md`.
 
