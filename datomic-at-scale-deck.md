@@ -1,531 +1,354 @@
 # Datomic at Scale
-## Operations, Parallelism and the Cost of a Read
+## Reads, Writes, Parallelism and Caches
 
 **A 2-hour class.**
 
-The class covers how a Datomic system behaves in production: what each
-component does when it fails, how failover works, what a read costs at
-each cache tier, where parallelism applies, which settings matter, and
-how to deploy peers.
+The class covers how a Datomic system performs in production, in four
+topics: reads, writes, parallelism and caches. Each topic follows the
+same shape — **how it works** (the basics), **an easy example**, and
+**the main catches** you will actually hit.
 
-> **How this deck works.** Slides carry the model and the diagrams.
-> REPL work lives in `src/datomic_ops/labs.clj` (§0–§6), referenced
-> from **⚑ waypoint** boxes. The coupling is loose: a waypoint can be
-> taken early, late, or skipped.
+> **How this deck works.** Everything is on the slides. Each section
+> starts from the basics, uses small examples, and keeps to the broad
+> performance picture — the goal is the right mental model, not a
+> tuning reference.
 >
 > **What this class assumes.** It continues from *Datomic in
-> Production*. The deployment map, write path, read path and
-> backup/restore drill are covered there
-> (`src/datomic_infra/labs.clj`) and are not repeated here.
+> Production*: what a peer, a transactor and storage are. Everything
+> else is (re)explained here.
 >
-> **[MEM] and [PRO].** Labs marked **[MEM]** run on `datomic:mem://`
-> with nothing installed. Labs marked **[PRO]** need Postgres, one or
-> two transactors, and `$DATOMIC` — see `infra/HA.md`; they are
-> demonstrated from the front, so no laptop is blocked on them.
+> **Going deeper.** `infra/HA.md` has the two-transactor setup, and
+> the Production class (`src/datomic_infra/labs.clj`) has the write
+> path, read path and backup drill in detail.
 
 ---
 
 ## Agenda (2:00)
 
-| Time | Section | Question |
-|------|---------|----------|
-| 0:00 | The failure map | what breaks, and how? |
-| 0:12 | **High availability** | who takes over, and how fast? |
-| 0:38 | **The cost of a read** | which tier answered? |
+| Time | Section | One-line version |
+|------|---------|------------------|
+| 0:00 | The map | three parts, and only one of them is fatal |
+| 0:12 | **Reads** | run in your process; cost depends on where the data is |
+| 0:40 | **Writes** | one door; batch, and know the two ways it can wait |
 | 1:02 | ☕ **Break (10 min)** | — |
-| 1:12 | **Parallelism** | what scales, and what does not? |
-| 1:38 | **Settings & signals** | which knob, and what does it affect? |
-| 1:52 | **Deployment** | how are peers shipped? |
-
-Setup: `infra/HA.md` for the live §2 lab. Otherwise `clj -M:repl`
-covers every `[MEM]` lab.
+| 1:12 | **Parallelism** | reads scale out; writes never do |
+| 1:38 | **Caches** | keep reads near the top of the ladder |
+| 1:55 | Summary | fails · waits · scales · costs |
 
 ---
 
-# Part I · The Failure Map
+# The Map
 
 ---
 
-## Four components, four different failures
+## Three moving parts
 
 ```
         ┌─────────┐   ┌─────────┐   ┌─────────┐
-        │  peer   │   │  peer   │   │  peer   │      query runs HERE
-        └────┬────┘   └────┬────┘   └────┬────┘      (your JVM)
+        │  peer   │   │  peer   │   │  peer   │     queries run HERE
+        └────┬────┘   └────┬────┘   └────┬────┘     (inside your app)
              │             │             │
-             │      ┌──────┴──────┐      │
-             ├──────┤  memcached  ├──────┤           optional, shared
-             │      └─────────────┘      │
              ▼             ▼             ▼
         ╔═══════════════════════════════════╗
-        ║             STORAGE               ║        source of truth
-        ╚═══════════════════════════════════╝        …and the arbiter
-                     ▲           ▲
-              ┌──────┴───┐   ┌───┴──────┐
-              │transactor│   │ standby  │            exactly ONE writes
-              │ (active) │   │ (parked) │
-              └──────────┘   └──────────┘
+        ║             STORAGE               ║       keeps the data
+        ╚═══════════════════════════════════╝       (Postgres, DynamoDB…)
+                          ▲
+                    ┌─────┴─────┐
+                    │transactor │                   ALL writes go here
+                    └───────────┘                   (one process)
 ```
+
+- The **peer** is a library inside your application. Queries run
+  there, on data the peer pulls close.
+- The **transactor** is one process that all writes go through, in
+  order.
+- **Storage** just keeps bytes. It is the only place the data lives.
+
+---
+
+## What happens when each one dies
 
 | It dies | Effect |
 |---------|--------|
-| **storage** | total outage — reads too, once the caches miss |
-| **transactor** | writes fail; reads continue |
-| **one peer** | that peer's traffic only; siblings unaffected |
-| **memcached** | nothing fails; storage load increases |
+| **storage** | everything stops — this is the real outage |
+| **transactor** | writes stop; **reads keep working** |
+| **one peer** | only that peer's traffic; the others don't notice |
 
-Three of the four are not outages. This is the main structural
-difference from a single-server SQL deployment, and the rest of the
-class follows from it.
-
-> **⚑ waypoint — labs §1 [MEM].** `(d/basis-t (d/db conn))`,
-> `(d/q all-readings (d/db conn))`, `(:datoms (d/db-stats (d/db conn)))`
-> — a peer's position in time, its data, and its size.
+Only one of the three failures is fatal. Reads and writes live and
+die separately — that is the single idea the rest of the class builds
+on.
 
 ---
 
-## The asymmetry
+# Part I · Reads
 
-```
-   READS      served by the peer, from caches and storage
-              → parallel; independent of the transactor
-
-   WRITES     serialised through ONE process
-              → ordered and transactional
-```
-
-HA protects the write path. Caching accelerates the read path.
-Parallelism means something different on each side.
+*A query runs in your process, on data pulled close.*
 
 ---
 
-## One clarification before tuning
+## How a read works
 
-`d/db-stats` reports the **database**, not the cache:
+1. Your code asks a query.
+2. The peer checks: **is the data already here?**
+   - **Yes** → answer immediately, from memory.
+   - **No** → fetch it from storage (milliseconds), **keep it**, answer.
+
+The same query, twice:
 
 ```clojure
-(:datoms (d/db-stats (d/db conn)))   ;; => 20301
+(time (d/q readings-q db))   ;; 1st run: ~120 ms  — fetching from storage
+(time (d/q readings-q db))   ;; 2nd run:   ~2 ms  — data is already local
 ```
 
-No peer API reports cache occupancy. Cache behaviour is observed
-through metrics (§5) or by timing two identical queries.
+A read costs whatever *fetching* costs. Once the data is local,
+reads are nearly free — and they never bother the transactor.
 
 ---
 
-# Part II · High Availability
+## The broad performance picture
+
+**Warm vs cold is the only distinction that matters.**
+
+```
+   warm peer   ▍            ~ms        data already local
+   cold peer   ██████████   ~100×     everything fetched from storage
+```
+
+Same query, same data, same code. The difference is only *where the
+data is when the query runs*. Most read-performance work in Datomic
+is really cache work (Part IV).
 
 ---
 
-## Datomic HA is a lease, not a cluster
+## The catches of reads
 
-Two identical transactor processes, same storage, one lease.
+1. **A restarted peer forgets everything.** Its first requests are
+   slow — it is re-fetching its world. (Why deploys hurt: Part IV.)
+2. **A new peer may not see your newest write.** Peers learn about
+   writes independently. If you write through one peer and read
+   through another, pass the `t` along and wait for it:
 
-```
-   transactor A ──┐                        A holds the lease
-                  ├──▶  ╔═══════════╗      B waits
-   transactor B ──┘     ║  STORAGE  ║
-                        ║  (lease)  ║      no quorum
-                        ╚═══════════╝      no consensus protocol
-                              ▲            no split brain
-                              │
-                          peers find
-                       the active one HERE
-```
-
-Storage is the arbiter: the lease lives where the data lives, so
-"who is the writer" and "what is committed" cannot disagree. There is
-no separate failover controller and no virtual IP.
-
-A standby that is working correctly prints nothing after startup.
+   ```clojure
+   @(d/sync conn t)   ;; a db guaranteed to include t
+   ```
+3. **One query runs on one core.** A slow query is not fixed by more
+   CPUs — only by its shape, or by warmer data. (Part III.)
 
 ---
 
-## What a failover looks like
+# Part II · Writes
 
-```
-   writes   ──ok──ok──ok──✗──✗──✗──✗──ok──ok──ok──▶
-                          └─── the window ───┘
-                          A dies      B has the lease
-
-   reads    ──ok──ok──ok──ok─ok─ok─ok──ok──ok──ok──▶
-```
-
-The peer reconnects on its own — no URI change, no restart, no load
-balancer. The width of the window depends on
-`heartbeat-interval-msec`, storage latency, and how warm the standby's
-JVM is, so it is measured rather than quoted.
-
-> **⚑ waypoint — labs §2 [PRO].** Start `writer-loop!`, then
-> `pkill -f pg-transactor.properties`, then read
-> `(failover-report @timeline)`. That number is your write-availability
-> SLO.
+*Everything goes through one door.*
 
 ---
 
-## What a standby covers
-
-| Covers | Does not cover |
-|---|---|
-| a **bounded write pause** | a second copy of the data |
-| unattended recovery | storage loss |
-| rolling transactor **upgrades** | a bad transaction |
-
-Data redundancy is storage replication's job. Restore is covered in the
-Production class, §4.
-
-The peer-side dial that shapes the pause:
+## How a write works
 
 ```
-datomic.txTimeoutMsec    how long a write waits for a writer to exist
+   peer ──┐
+   peer ──┼──▶  ONE transactor ──▶ storage
+   peer ──┘     (in order, one
+                 at a time)
 ```
 
-A short timeout produces fewer stalled threads and more failed writes;
-a long one, the reverse. Tuning it means choosing between those.
+Every write goes through the single transactor, which applies
+transactions **in order**. That is what gives you ACID transactions
+with no locks and no conflicts to resolve.
+
+The flip side: **write capacity is fixed.** You cannot add write
+machines. What you *can* do is use the one door well.
 
 ---
 
-# Part III · The Cost of a Read
-
----
-
-## Four tiers
-
-A read walks down until a tier answers:
-
-```
-  ┌──────────────────────────────────────────────┬───────────────┐
-  │ 1  object cache   on-heap, decoded segments  │   ns … µs     │
-  ├──────────────────────────────────────────────┼───────────────┤
-  │ 2  valcache       local SSD, per peer        │   ~100s of µs │
-  ├──────────────────────────────────────────────┼───────────────┤
-  │ 3  memcached      shared, over the network   │   ~1 ms       │
-  ├──────────────────────────────────────────────┼───────────────┤
-  │ 4  storage        Postgres / DDB / S3        │   ms, metered │
-  └──────────────────────────────────────────────┴───────────────┘
-```
-
-Tier 2 is the addition in this class. It is also the only tier that
-survives a process restart, which matters more than its latency.
-
----
-
-## The unit of caching is a segment
-
-Not an entity, and not a row:
+## Using the one door well: batch
 
 ```clojure
-(d/pull db '[*] some-e)                               ;; one entity asked for
-(count (seq (d/index-range db :reading/t 4240 4260))) ;; => 20 in the segment
+;; slow — 1,000 trips through the door
+(doseq [r rows]
+  @(d/transact conn [r]))
+
+;; fast — 10 trips carrying 100 each
+(doseq [batch (partition-all 100 rows)]
+  @(d/transact conn batch))
 ```
 
-Neighbours in the index share a segment. So the working set is measured
-in segments, and cache sizing follows the segments a workload touches
-rather than the entities it names.
-
-> **⚑ waypoint — labs §3 [MEM].** The segment demo needs no
-> infrastructure — it is a property of the index, not of the cache.
+Most write throughput is batching. The second lever: don't wait for
+each acknowledgement before sending the next batch (keep a few in
+flight — "pipelining"). Batching first; it is 90% of the win.
 
 ---
 
-## Cold peers after a deploy
+## Catch 1 · the writer can pause
 
-Twenty peers restart together, with twenty empty object caches, and ask
-storage the same questions at the same time.
+Run **two** transactors: one active, one standby. If the active one
+dies, the standby takes over automatically.
 
 ```
-   before deploy      │  after deploy
-   ───────────────────┼──────────────────────────────────
-   blks_hit  ████████ │  blks_read ████████████████████
-   blks_read █        │  blks_hit  ██
-                      │  ↑ every peer, cold, simultaneously
+   writes   ──ok──ok──✗──✗──✗──ok──ok──▶     a short pause (seconds)
+   reads    ──ok──ok──ok──ok──ok──ok──ok─▶   never interrupted
 ```
 
-Three mitigations:
-
-1. **memcached** — one shared miss instead of N *(needs a server)*
-2. **valcache** — survives the restart that caused it *(needs a disk)*
-3. **rolling deploys** — don't replace 20 peers at once *(needs nothing)*
-
-> **⚑ waypoint — labs §3 [PRO].** Add valcache with two `-D` flags,
-> restart the REPL, re-run the cold query. Then set
-> `datomic.objectCacheMax=32m` and re-run the warm one. The gap between
-> those two measurements is the object-cache sizing signal for this
-> dataset.
+- Peers reconnect by themselves — nothing to fail over manually.
+- During the pause, writes fail or wait; **reads don't notice.**
+- A standby is **not a backup** — both write to the same storage.
+  Data safety comes from storage replication and backups.
 
 ---
 
-## ☕ Break — 10 minutes
+## Catch 2 · the writer can push back
 
-Next: which half of the system scales, and which does not.
+Behind the scenes the transactor also *indexes* — it periodically
+reorganizes recent writes into storage. If writes arrive faster than
+indexing can keep up, the transactor **deliberately slows writers
+down** (back-pressure).
+
+What you see: write latency rises, **no errors anywhere**.
+
+What it means: not a failure — the system protecting itself. Ask why
+indexing is slow (usually: storage is slow) before touching knobs.
 
 ---
 
-# Part IV · Parallelism
+# ☕ Break — 10 minutes
 
 ---
 
-## One writer, many readers
+# Part III · Parallelism
+
+*Reads scale out. Writes never do.*
+
+---
+
+## One word, two sides
 
 ```
    WRITES                        READS
    ──────                        ─────
-   one transactor                every peer, every core
-   cannot be parallelised        parallel
-   can be pipelined              cost storage nothing once warm
-
-   lever: keep the writer        lever: cut the work up along
-   from going idle               the index
+   one process, serial           every peer, every core
+   cannot be parallelized        parallel by default
+   lever: batch + keep busy      lever: split the work up
 ```
 
-Both are called "parallelism"; they are different mechanisms.
+Reads parallelize freely because a Datomic `db` is an **immutable
+value** — nothing can change under a reader, so there is nothing to
+lock or coordinate.
 
 ---
 
-## Pipelining, measured on mem
+## Easy example · split a big read
 
-Serial versus pipelined writes on `datomic:mem://`:
+100,000 readings, cut into 8 slices along the index, `pmap` across
+cores — each slice is an independent read:
+
+```
+   serial     78.7 ms
+   8 slices   24.7 ms      ≈ 3×
+```
+
+Rules of thumb:
+
+- Slice roughly to the number of cores. Hundreds of tiny slices just
+  add overhead.
+- Every slice reads the *same* db value — no snapshots, no locks,
+  nothing to clean up.
+
+---
+
+## Easy example · try before you commit
+
+`d/with` applies a transaction to a db **value** — no transactor, no
+durability, just "what would the db look like if…":
 
 ```clojure
-[(serial! 500000) (pipeline! 600000)]
-;; => [24.69 24.31]        ms — no difference
+(d/with db proposed-tx)          ;; => a new value; the real db unchanged
+(pmap #(check (d/with db %)) scenarios)   ;; many at once, safely
 ```
 
-`datomic:mem://` runs the transactor inside the same JVM, so there is
-no round trip for pipelining to overlap. The measurement isolates the
-mechanism: pipelining does not make the transactor faster, it keeps it
-from idling between round trips.
-
-Running the same two lines against a transactor over a socket produces
-a gap proportional to the round-trip cost — which is why the number is
-measured per environment.
-
-Unbounded pipelining trades latency for heap. In production, 8–16
-transactions in flight covers most of the benefit.
+Use it to validate a big import before spending transactor time on
+it, or to compare what-if scenarios in parallel.
 
 ---
 
-## Parallel reads: slicing the index
+## The catches of parallelism
 
-`:reading/t` is indexed, so AVET can be sliced. Each slice is an
-independent read — no locks, no coordination, no transactor.
-
-```
-   d/index-range over 100,000 readings
-
-   ├──────┼──────┼──────┼──────┼──────┼──────┼──────┼──────┤
-      8 slices, one immutable db value, pmap across 10 cores
-
-   serial   78.70 ms
-   pmap     24.68 ms          ≈ 3.2×     (median of five runs)
-```
-
-Two constraints:
-
-- `db` is a **value**, so every slice reads the same immutable
-  database. There is no snapshot to hold open and no transaction to
-  leak.
-- Speed-up is bounded by cache misses rather than cores. On a cold peer
-  the parallelism overlaps storage waits.
-
-There is also a floor. Re-cutting the same 100,000 readings:
-
-```
-   slices        8      100     1000    10000
-   pmap ms   24.68    27.62    30.12    54.41
-```
-
-The degradation is gradual, and only at 10,000 slices does the parallel
-version approach the 78.70 ms serial baseline.
+1. **One `d/q` uses one core.** There is no setting that changes
+   this. Parallelism is always *across* queries or slices you cut.
+2. **A second transactor adds zero write throughput.** It is a
+   standby for failover (Part II), not a second worker.
+3. **On a cold peer, the speedup is fake-ish.** You are overlapping
+   fetches, not dividing CPU work. Still useful — but the real fix
+   is a warm cache.
 
 ---
 
-## Parallel what-ifs
+# Part IV · Caches
 
-`d/with` applies a transaction to a database value. No transactor is
-involved, so many can run concurrently:
-
-```clojure
-(doall (pmap #(d/q all-readings (:db-after (d/with db %))) scenarios))
-;; => ([[105005]] [[105005]] [[105005]])
-
-(d/q all-readings db)
-;; => [[105000]]          the base db is unchanged
-```
-
-Useful for validation, scenario analysis, and import dry runs.
+*Where the read cost actually goes.*
 
 ---
 
-## Where parallelism does not apply
+## The ladder
 
-A single `d/q` is single-threaded inside the peer. Parallelism applies
-across queries, or across index slices cut by the caller — not within
-one query. A slow single query is addressed by its shape or its cache.
-
-> **⚑ waypoint — labs §4 [MEM].** All four experiments run in memory,
-> including the one that shows no difference.
-
----
-
-# Part V · Settings and Signals
-
----
-
-## The memory-index loop
+A read walks down until a tier answers:
 
 ```
-      writes ──▶ ┌─────────────────┐
-                 │  memory index   │──▶ durable log (always)
-                 └────────┬────────┘
-                          │ past memory-index-threshold
-                          ▼
-                 ┌─────────────────┐
-                 │  indexing job   │──▶ storage
-                 └────────┬────────┘
-                          │ if writes keep outrunning it
-                          ▼
-                 ┌─────────────────────────────────┐
-                 │  memory-index-max reached       │
-                 │  → transactor throttles writers │
-                 │  → p99 write latency rises      │
-                 └─────────────────────────────────┘
+  ┌──────────────────────────────────────────────┬──────────────┐
+  │ 1  object cache   in the peer's memory       │  ~instant    │
+  ├──────────────────────────────────────────────┼──────────────┤
+  │ 2  valcache       local SSD (survives        │  fast        │
+  │                   restarts!)                 │              │
+  ├──────────────────────────────────────────────┼──────────────┤
+  │ 3  memcached      shared between peers       │  ~1 ms       │
+  ├──────────────────────────────────────────────┼──────────────┤
+  │ 4  storage        the database itself        │  slow, $     │
+  └──────────────────────────────────────────────┴──────────────┘
 ```
 
-`threshold` starts the indexing job; `max` starts throttling. The
-throttle is intentional back-pressure, not a failure — but it is what
-appears on the dashboard, so the loop is worth knowing before tuning.
+1 comes for free. 2 and 3 are optional add-ons. Your whole job:
+keep everyday reads answering from as high up as possible.
+
+Nothing ever needs invalidating — Datomic data is immutable, so a
+cached block is correct forever. That is why stacking four caches is
+safe with no coordination at all.
 
 ---
 
-## The settings, and what each affects
+## The unit is a block, not a row
 
-**Transactor** — properties file:
+When you ask for one entity, the peer fetches the whole index
+**segment** it lives in — thousands of neighboring datoms come along
+free.
 
-| Setting | If | Effect |
-|---|---|---|
-| `memory-index-threshold` | too high | long, bursty indexing jobs |
-| `memory-index-max` | too low | early throttling under load |
-| `object-cache-max` | too low | warm reads behave like cold ones |
-| `memcached` | unset | each peer misses separately |
-| `heartbeat-interval-msec` | too high | longer §2 failover window |
-
-**Peer** — `-D` flags:
-
-| Flag | Effect |
-|---|---|
-| `datomic.objectCacheMax` | the peer's own heap cache |
-| `datomic.memcachedServers` | join the shared tier |
-| `datomic.valcachePath` | the SSD tier |
-| `datomic.valcacheMaxGb` | how much of that disk to use |
-| `datomic.txTimeoutMsec` | how long a write waits for a writer |
-
-Note: passing any JVM flag to `bin/transactor` makes it drop its own GC
-defaults. Re-specify `-XX:+UseG1GC -XX:MaxGCPauseMillis=50` when
-passing anything.
+Consequence: **data read together is cheap if it lives together** in
+an index. Scanning a range of readings by time = a few segments.
+Fetching 1,000 scattered entities = up to 1,000 segments. Same
+answer size, ~100× the fetching.
 
 ---
 
-## Read the defaults from the distribution
+## Catch 1 · deploys empty the caches
 
-```sh
-ls $DATOMIC/config/samples/
-grep -vE '^\s*(#|$)' $DATOMIC/config/samples/sql-transactor-template.properties
-grep -rn "valcache" $DATOMIC/bin $DATOMIC/config
-```
+Restart all 20 peers at once → 20 empty caches → everyone fetches
+the same things from storage at the same moment. Latency spikes,
+zero errors, resolves itself in minutes — and often gets misread as
+a bad release and rolled back (which restarts everything again).
 
-Defaults change between releases. Where the distribution and this deck
-disagree, the distribution is current.
+Three fixes, cheapest first:
 
----
-
-## Two instruments already available
-
-**`d/sync-index`** returns a db whose *index* — not only its log —
-includes a given `t`. `d/sync` waits on the log alone; the difference
-appears under load.
-
-**The tx-report queue** lets any peer observe transactions as they
-land:
-
-```clojure
-:t 1001 :datoms 401
-:t 1102 :datoms 401     ;; 100 readings × 4 attrs + 1 txInstant
-```
-
-Used for audit, cache invalidation and CDC; in class, as a throughput
-monitor.
-
-**Signals to alert on**, mapping onto the loop above:
-
-- alarms of any kind
-- indexing job duration — the drain is falling behind
-- transaction latency p99 — throttling
-- storage read/write time — the bottleneck is storage
-- memcached hit ratio — the shared tier is not being shared
-
-> **⚑ waypoint — labs §5.** The memory-index demo is [MEM]; the
-> metrics-callback contract is read from the distribution.
+1. **Rolling deploys** — replace a few peers at a time *(needs nothing)*
+2. **memcached** — 20 cold peers cause 1 shared miss, not 20 *(needs a server)*
+3. **valcache** — the SSD cache survives the restart *(needs a disk)*
 
 ---
 
-# Part VI · Deployment
+## Catch 2 & 3 · small but common
 
----
-
-## A peer carries a cache
-
-The cache is the difference between a 10 ms read and a 1,000 ms read,
-so a readiness probe that succeeds at process start reports a peer that
-is up but cold.
-
-```clojure
-(defn warm! [conn]
-  (let [db (d/db conn)]
-    (doall (pmap (fn [[lo hi]] (count (seq (d/index-range db :reading/t lo hi))))
-                 (partition 2 1 (range 0 20001 2500))))
-    {:ready? true :basis-t (d/basis-t db)}))
-```
-
-Warming the segments the service reads moves that cost ahead of the
-first request.
-
-> **⚑ waypoint — labs §6 [MEM].** Run `warm!`, then the `d/sync`
-> read-your-writes check on the next slide.
-
----
-
-## Reading your own writes
-
-A fresh peer starts at whatever `t` storage gives it. A request
-arriving just after a write through a *different* peer can be served a
-database that does not include it.
-
-```clojure
-(d/basis-t (deref (d/sync conn t) 5000 nil))
-;; => 21011      the t that was written
-```
-
-Passing the `t` with the request is the consistency contract of a
-multi-peer deployment. For the index rather than the log, `d/sync-index`.
-
----
-
-## Rollout order
-
-```
-   1. ship the SCHEMA          additive → old peers ignore what's new
-   2. roll peers in WAVES      avoids the cold-cache burst
-   3. WARM, then report ready
-   4. roll the TRANSACTOR      §2's failover, intentionally
-```
-
-Step 1 differs from SQL: Datomic schema is additive, so an old peer
-ignores attributes it does not know. There is no lock, no `ALTER`, and
-no migration window, which is what makes the rolling order safe.
-
-Step 4 is a rolling transactor upgrade: start the new-version standby,
-stop the old active, and spend one bounded write pause. From a peer, an
-upgrade and an outage are indistinguishable.
+- **memcached dying breaks nothing** — everything just gets slower
+  as storage takes the traffic. Treat it as a degradation, not an
+  incident.
+- **You can't ask the cache anything.** No API reports what is
+  cached. To see cache behaviour: time the same query twice, or
+  watch storage-read metrics.
 
 ---
 
@@ -533,23 +356,20 @@ upgrade and an outage are indistinguishable.
 
 | | |
 |---|---|
-| **Fails** | storage totally · transactor for writes · peers locally |
-| **Waits** | writers, during failover and during throttling |
-| **Scales** | reads: peers × cores · writes: by pipelining |
+| **Fails** | only storage is fatal; transactor = writes pause; a peer = local |
+| **Waits** | writers — during failover, and during back-pressure |
+| **Scales** | reads: more peers, more cores · writes: only batching |
 | **Costs** | storage, whenever a cache is cold |
 
-The settings in Part V are lookups; this table is the model they
-operate on.
+Any performance symptom lands on one of these four rows.
 
 ---
 
 ## Where to go next
 
-- `src/datomic_infra/labs.clj` — *Datomic in Production*: the paths and
-  storage layers this class assumed.
-- `infra/HA.md` — the two-transactor setup, if §2 was not run live.
-- Datomic Cloud handles §2 and §6 differently: **query groups** are the
-  read scaling of §4 as an autoscaling group, and failover is managed
-  by the platform. Same model, different operational surface.
-- The failover drill is worth repeating on your own staging
-  environment, since the window depends on that infrastructure.
+- `src/datomic_infra/labs.clj` — *Datomic in Production*: the write
+  path, read path and backup drill in full detail.
+- `infra/HA.md` — the two-transactor setup, to run the failover
+  yourself.
+- Datomic Cloud: same model; the platform manages failover, and
+  "query groups" are Part III's read scaling as an autoscaling group.

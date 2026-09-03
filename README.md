@@ -14,12 +14,11 @@ Companion materials for six classes:
   entities, transactions, indexes, as-of/since/history, and data sources.
   Reuses the Production class infra (Postgres + Pro transactor).
 
-- **Datomic at Scale** — a 2-hour class on operating Datomic: high
-  availability and transactor failover, the cache tiers and the cost of
-  a cold read, what
-  parallelism means on the write path versus the read path, the
-  production settings and what each one affects, and how peers are
-  deployed. Continues from *Datomic in Production*.
+- **Datomic at Scale** — a 2-hour class on Datomic performance in
+  production, in four topics: reads, writes, parallelism and caches.
+  Each topic covers the basics, one easy example, and the main catches
+  (cold peers, transactor failover, back-pressure, the cache ladder).
+  Continues from *Datomic in Production*, assuming only its vocabulary.
 
 - **Fulcro RAD × Datomic — Attributes All The Way Down** — a 2-hour,
   full-stack class on a scaffolded Fulcro RAD application: ~10 attribute
@@ -97,30 +96,21 @@ at the final one. See `datomic-final-project.md`.
 
 ### Datomic at Scale
 
-- `datomic-at-scale.pptx` - the 2-hour slide deck (42 slides). Every
+- `datomic-at-scale.pptx` - the 2-hour slide deck (27 slides). Every
   diagram is drawn with real shapes, and the explanatory prose lives in
   the speaker notes, one note per slide.
 - `datomic-at-scale-deck.js` - its source; `node datomic-at-scale-deck.js`
   regenerates the pptx (requires `npm install pptxgenjs`). Run with
   `DECK_QA=1` to also print a text overflow / collision report.
 - `datomic-at-scale-deck.md` - the same deck in markdown (model +
-  diagrams; REPL work referenced via ⚑ waypoints rather than
-  slide-by-slide).
+  diagrams).
 - `datomic-at-scale-preclass.md` - the one-page brief to send
   participants beforehand: what the class covers, what to install, and
   the single command that warms the dependency cache before they are on
   the room's network.
-- `src/datomic_ops/labs.clj` - the lab companion, §0–§6. Labs are
-  tagged **[MEM]** (runs on `datomic:mem://`, nothing installed — these
-  are machine-verified) or **[PRO]** (needs Postgres, a transactor or
-  two, and `$DATOMIC`).
-- `infra/HA.md` + `infra/pg-transactor-standby.properties` - the second
-  transactor, for the live failover in §2.
-
-  ```sh
-  clj -M:repl                    # enough for every [MEM] lab
-  clj -M:infra:repl              # adds the JDBC driver, for the [PRO] labs
-  ```
+- `infra/HA.md` + `infra/pg-transactor-standby.properties` - the
+  two-transactor setup, if you want to reproduce the Part II failover on
+  your own infrastructure. Not needed to teach or attend the class.
 
 ### Fulcro RAD × Datomic — Attributes All The Way Down
 
@@ -183,10 +173,9 @@ unzipped locally, for `bin/transactor` and `bin/datomic`. Datomic Pro has
 been Apache-2.0 licensed and free since 2023 — no account, no license key.
 See `infra/README.md`.
 
-**Datomic at Scale** runs its `[MEM]` labs on `datomic:mem://`, so
-`clj -M:repl` is enough to follow most of it. The `[PRO]` labs — valcache, the deploy stampede, and the live
-transactor failover — need the Production class's infrastructure plus a
-second transactor; see `infra/HA.md`.
+**Datomic at Scale** is slides throughout and needs nothing installed to
+attend. Reproducing the Part II failover yourself needs the Production
+class's infrastructure plus a second transactor; see `infra/HA.md`.
 
 **Datomic Console — Wall to Wall** needs the same infra as Production
 (Docker Postgres + Pro transactor), plus `bin/console` from the Pro

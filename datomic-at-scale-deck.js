@@ -201,7 +201,7 @@ function titleSlide(kicker, title, subtitle, notes) {
   return s;
 }
 
-function sectionSlide(num, title, blurb, notes) {
+function sectionSlide(num, title, blurb, notes, body) {
   const s = pres.addSlide();
   bar(s, 0, 0, W, H, C.dark);
   page += 1;
@@ -209,6 +209,7 @@ function sectionSlide(num, title, blurb, notes) {
   txt(s, "PART " + num, { x: 0.9, y: 2.3, w: 11.5, h: 0.4, fontSize: 15, color: C.goldHi, charSpacing: 3 });
   txt(s, title, { x: 0.9, y: 2.85, w: 11.5, h: 0.9, fontFace: F.serif, fontSize: 34, color: C.white });
   if (blurb) txt(s, blurb, { x: 0.9, y: 3.85, w: 11.5, h: 0.8, fontSize: 16, color: C.rule });
+  if (body) prose(s, body, { x: 0.9, y: 4.85, w: 11.5, h: 2.0, size: 14, color: C.rule });
   txt(s, String(page), { x: 12.2, y: 7.0, w: 0.7, h: 0.28, fontSize: 11, color: C.meta, align: "right" });
   if (notes) s.addNotes(notes);
   return s;
@@ -232,34 +233,35 @@ function takeaway(slide, text, y = 6.55) {
   });
 }
 
+/** The bottom CASES strip: two or three concrete examples, all sourced from
+ *  the labs or from the slide above. Deliberately WITHOUT fit: "shrink", so
+ *  over-long text trips the QA overflow check instead of silently rendering
+ *  at 8pt. If a build reports OVERFLOW here, cut words. */
+function cases(slide, items, opts = {}) {
+  const y = opts.y === undefined ? 6.98 : opts.y;
+  const h = opts.h || 0.40;
+  bar(slide, 0.6, y + 0.04, 0.06, h - 0.08, C.gold);
+  txt(slide, "CASES", {
+    x: 0.78, y, w: 0.72, h, fontSize: 9, color: C.gold, bold: true,
+    charSpacing: 1, valign: "middle",
+  });
+  txt(slide, items.join("   ·   "), {
+    x: 1.6, y, w: opts.w || 10.4, h, fontSize: 11, color: C.body, valign: "middle",
+  });
+}
+
 function note(slide, text, y = 6.7) {
   txt(slide, text, { x: 0.6, y, w: 12.1, h: 0.4, fontSize: 12.5, color: C.meta, italic: true, fit: "shrink" });
 }
 
-/** The recurring ⚑ waypoint panel: where the class leaves the slides for the REPL. */
-function waypoint(slide, ref, tag, lines, opts = {}) {
-  const y = opts.y === undefined ? 5.5 : opts.y;
-  const h = opts.h || 1.35;
-  const x = opts.x === undefined ? 0.6 : opts.x;
-  const w = opts.w || 12.1;
-  bar(slide, x, y, w, h, C.panel2, { round: true });
-  bar(slide, x, y, 0.09, h, C.gold);
-  txt(slide, "⚑  " + ref, {
-    x: x + 0.3, y: y + 0.12, w: w - 2.2, h: 0.32,
-    fontSize: 13, color: C.gold, bold: true, charSpacing: 1,
-  });
-  const tagColor = tag === "PRO" ? C.bad : C.ok;
-  const tagBg    = tag === "PRO" ? C.badBg : C.okBg;
-  if (tag) {
-    bar(slide, x + w - 1.15, y + 0.12, 0.85, 0.32, tagBg, { round: true });
-    txt(slide, "[" + tag + "]", {
-      x: x + w - 1.15, y: y + 0.12, w: 0.85, h: 0.32,
-      fontSize: 11, color: tagColor, bold: true, align: "center", valign: "middle",
-    });
-  }
-  txt(slide, lines, {
-    x: x + 0.3, y: y + 0.5, w: w - 0.6, h: h - 0.62,
-    fontSize: 12.5, color: C.body, fontFace: opts.mono ? F.mono : F.sans, fit: "shrink",
+/** A block of explanatory body text. Like cases(), it deliberately omits
+ *  fit: "shrink" — if the text does not fit, the QA overflow check says so
+ *  instead of quietly rendering it two points smaller. */
+function prose(slide, text, opts = {}) {
+  txt(slide, text, {
+    x: opts.x === undefined ? 0.6 : opts.x,
+    y: opts.y, w: opts.w || 12.1, h: opts.h,
+    fontSize: opts.size || 13.5, color: opts.color || C.body,
   });
 }
 
@@ -345,481 +347,333 @@ function defList(slide, x, y, w, rows, opts = {}) {
 titleSlide(
   "A 2-HOUR CLASS",
   "Datomic at Scale",
-  "Operations, parallelism, and the cost of a read",
-  "Fifth class in the series. It continues from *Datomic in Production*: the deployment map, the write path, the read path and the backup/restore drill are covered there and are not repeated here.\n\nThe question this class answers: how does a Datomic system behave in production — what each component does when it fails, how failover works, what a read costs at each cache tier, where parallelism applies, which settings matter, and how peers are shipped.\n\nTwo hours, six parts, one part per question. The labs are reached from waypoint boxes and are optional at every point: the slides carry the model on their own."
+  "Reads, writes, parallelism and caches — the basics and the catches",
+  "Fifth class in the series. It continues from *Datomic in Production*, but the only thing it assumes is the vocabulary: what a peer, a transactor and storage are. Everything else is explained from the basics here.\n\nThe class covers how a Datomic system performs in production, in four topics: reads, writes, parallelism and caches. Each topic follows the same three-step shape — how it works, an easy example, and the main catches you will actually hit.\n\nThe goal is the right mental model, not a tuning reference. Knob tables and environment-specific measurements are deliberately left out; the Production class materials have them."
 );
 
-// How the deck works
+// How the class works
 {
-  const s = slide("FRAME", "How this deck works",
-    "Slides carry the model and the diagrams. REPL work lives in src/datomic_ops/labs.clj (§0–§6) and is reached through waypoint boxes. The coupling is loose on purpose: a waypoint can be taken early, late, or skipped entirely without breaking the thread of the class.\n\nLabs marked [MEM] run on datomic:mem:// with nothing installed — every laptop in the room can run them, and the numbers on the slides came from those labs. Labs marked [PRO] need Postgres, one or two transactors and $DATOMIC — see infra/HA.md — and are demonstrated from the front, so nobody is blocked on infrastructure.");
+  const s = slide("FRAME", "Four topics, three steps each",
+    "The whole class is four topics, and every topic follows the same shape.\n\nFirst the basics: how the mechanism works, drawn simply. Then one easy example — small code or a small measurement, chosen to be readable rather than impressive. Then the main catches: the two or three things that actually surprise people in production.\n\nWhat is deliberately NOT here: settings tables, environment-specific benchmarks, and deployment runbooks. Those live in the Production class materials. This class is about carrying the right mental model, so that when a symptom appears you know which of the four topics it belongs to.\n\nThe only assumed knowledge is vocabulary from the Production class: peer, transactor, storage. The opening section re-draws that map in two slides anyway.");
 
-  panel(s, 0.6, 1.45, 5.85, 2.5, "SLIDES");
-  txt(s, "The model and the diagrams.\n\nEverything needed to follow the class is\nprojected — the labs add measurement,\nnot content.",
-    { x: 0.85, y: 2.05, w: 5.35, h: 1.7, fontSize: 13.5, color: C.body });
+  const topics = [
+    ["READS", "run in your process — the cost depends on where the data is", C.coolBg, C.cool],
+    ["WRITES", "one door — batch well, and know the two ways it can wait", C.warnBg, C.warn],
+    ["PARALLELISM", "reads scale out — writes never do", C.okBg, C.ok],
+    ["CACHES", "keep everyday reads near the top of the ladder", C.panel2, C.gold],
+  ];
+  topics.forEach((t, i) => {
+    const y = 1.5 + i * 1.02;
+    bar(s, 0.6, y, 7.6, 0.88, t[2], { round: true });
+    txt(s, t[0], { x: 0.9, y, w: 2.4, h: 0.88, fontSize: 15, color: t[3], bold: true, charSpacing: 1.5, valign: "middle" });
+    txt(s, t[1], { x: 3.3, y, w: 4.75, h: 0.88, fontSize: 12.5, color: C.ink, valign: "middle", fit: "shrink" });
+  });
 
-  panel(s, 6.85, 1.45, 5.85, 2.5, "LABS · src/datomic_ops/labs.clj");
-  txt(s, "§0–§6, reached from the ⚑ waypoint boxes.\n\nLoosely coupled: take one early, late,\nor not at all.",
-    { x: 7.1, y: 2.05, w: 5.35, h: 1.7, fontSize: 13.5, color: C.body });
+  panel(s, 8.5, 1.5, 4.2, 3.94, "EACH TOPIC, IN 3 STEPS", { strip: C.panel2 });
+  [["1", "the basics", "how it works, drawn simply"],
+   ["2", "an easy example", "small code, small numbers"],
+   ["3", "the catches", "what surprises people"]].forEach((r, i) => {
+    const y = 2.15 + i * 1.05;
+    txt(s, r[0], { x: 8.75, y, w: 0.5, h: 0.9, fontFace: F.serif, fontSize: 24, color: C.gold, bold: true });
+    txt(s, r[1], { x: 9.35, y: y + 0.05, w: 3.2, h: 0.35, fontSize: 14, color: C.ink, bold: true });
+    txt(s, r[2], { x: 9.35, y: y + 0.45, w: 3.2, h: 0.35, fontSize: 11.5, color: C.body, fit: "shrink" });
+  });
 
-  // legend
-  bar(s, 0.6, 4.25, 5.85, 1.05, C.okBg, { round: true });
-  bar(s, 0.85, 4.5, 0.85, 0.32, C.ok, { round: true });
-  txt(s, "[MEM]", { x: 0.85, y: 4.5, w: 0.85, h: 0.32, fontSize: 11, color: C.white, bold: true, align: "center", valign: "middle" });
-  txt(s, "runs on datomic:mem:// — nothing installed, works on every laptop",
-    { x: 1.95, y: 4.5, w: 4.4, h: 0.6, fontSize: 12.5, color: C.ink, valign: "middle", fit: "shrink" });
-
-  bar(s, 6.85, 4.25, 5.85, 1.05, C.badBg, { round: true });
-  bar(s, 7.1, 4.5, 0.85, 0.32, C.bad, { round: true });
-  txt(s, "[PRO]", { x: 7.1, y: 4.5, w: 0.85, h: 0.32, fontSize: 11, color: C.white, bold: true, align: "center", valign: "middle" });
-  txt(s, "needs Postgres + transactor(s) + $DATOMIC — see infra/HA.md",
-    { x: 8.2, y: 4.5, w: 4.4, h: 0.6, fontSize: 12.5, color: C.ink, valign: "middle", fit: "shrink" });
-
-  takeaway(s, "Assumed: Datomic in Production. Not repeated here: deployment map, write path, read path, backup/restore.", 5.6);
-  note(s, "Setup: clj -M:repl covers every [MEM] lab.", 6.3);
+  takeaway(s, "Goal: the right mental model — not a tuning reference. The knob tables live in the Production class.", 5.75);
+  cases(s, [
+    "Assumed: only the words peer, transactor, storage",
+    "Left out on purpose: settings tables, benchmarks, runbooks",
+  ]);
 }
 
 // Agenda
 {
-  const s = slide("FRAME", "Two hours, six questions",
-    "Each part answers one operational question, and the six answers compose into a single model: what fails, who takes over, what a read costs, what scales, which knob, and how it ships.\n\nThe minute marks are a plan, not a contract — the failover drill in Part II and the parallelism measurements in Part IV are the two places where a class typically runs long, and both are worth the overrun. Parts V and VI are lookups and compress well if the earlier parts ran over.");
+  const s = slide("FRAME", "Two hours, four topics",
+    "Twelve minutes to redraw the map, then roughly 25 minutes per topic, a break in the middle, and a summary that compresses everything into four verbs.\n\nEach section is self-contained: basics first, then an easy example, then the catches. If a section runs long, the catches slide is the one to keep — it is the part people hit in production.");
+
   const rows = [
-    ["0:00", "The failure map",     "what breaks, and how?",              C.gold],
-    ["0:12", "High availability",   "who takes over, and how fast?",      C.gold],
-    ["0:38", "The cost of a read",  "which tier answered?",               C.gold],
-    ["1:02", "☕ Break — 10 min",    "—",                                  C.meta],
-    ["1:12", "Parallelism",         "what scales, and what does not?",    C.gold],
-    ["1:38", "Settings & signals",  "which knob, and what does it affect?", C.gold],
-    ["1:52", "Deployment",          "how are peers shipped?",             C.gold],
+    ["0:00", "The map", "three parts — only one of them is fatal", C.panel],
+    ["0:12", "Reads", "run in your process; cost = where the data is", C.coolBg],
+    ["0:40", "Writes", "one door; batch, and the two ways it waits", C.warnBg],
+    ["1:02", "☕ Break (10 min)", "", C.panel2],
+    ["1:12", "Parallelism", "reads scale out; writes never do", C.okBg],
+    ["1:38", "Caches", "keep reads near the top of the ladder", C.panel2],
+    ["1:55", "Summary", "fails · waits · scales · costs", C.panel],
   ];
   rows.forEach((r, i) => {
-    const y = 1.5 + i * 0.62;
-    if (i % 2 === 0) bar(s, 0.6, y, 12.1, 0.56, C.panel);
-    txt(s, r[0], { x: 0.8, y, w: 1.0, h: 0.56, fontFace: F.mono, fontSize: 14, color: r[3], valign: "middle" });
-    txt(s, r[1], { x: 2.0, y, w: 5.2, h: 0.56, fontSize: 15.5, color: C.ink, bold: true, valign: "middle", fit: "shrink" });
-    txt(s, r[2], { x: 7.3, y, w: 5.2, h: 0.56, fontSize: 14, color: C.body, valign: "middle", fit: "shrink" });
+    const y = 1.5 + i * 0.72;
+    bar(s, 0.6, y, 12.1, 0.6, r[3], { round: true });
+    txt(s, r[0], { x: 0.9, y, w: 1.0, h: 0.6, fontFace: F.mono, fontSize: 13, color: C.meta, valign: "middle" });
+    txt(s, r[1], { x: 2.1, y, w: 3.4, h: 0.6, fontSize: 14.5, color: C.ink, bold: true, valign: "middle" });
+    txt(s, r[2], { x: 5.7, y, w: 6.8, h: 0.6, fontSize: 12.5, color: C.body, valign: "middle", fit: "shrink" });
   });
-  note(s, "Setup: infra/HA.md for the live Part II lab. Otherwise clj -M:repl covers every [MEM] lab.", 6.0);
+  note(s, "infra/HA.md has the two-transactor setup, if you want to run Part II's failover yourself.", 6.75);
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// PART I · THE FAILURE MAP
+// THE MAP
 // ═══════════════════════════════════════════════════════════════════
 
-sectionSlide("I", "The failure map", "Four components · four different failures · one of them an outage",
-  "The point of this part is structural, not procedural. In a single-server SQL deployment, everything that can die takes the application with it. In Datomic, three of the four things that can die do not.\n\nThe reason is the split: query, write, cache and durability live in four processes with four lifetimes. A failure takes down a responsibility rather than the system. Everything after this part is a consequence of the split — Part II covers the writer, Part III the reader, and neither mechanism helps the other.");
-
-// The architecture
+// Three moving parts
 {
-  const s = slide("PART I · THE FAILURE MAP", "Four components, and where the work happens",
-    "Walk the picture top to bottom.\n\nPeers are libraries inside your JVM. The query engine runs there — not in a server. Each peer holds its own object cache of decoded segments.\n\nMemcached is optional and shared: peers consult it before storage, so N cold peers cause one storage miss instead of N.\n\nStorage is the source of truth AND the arbiter of who may write — that second role is what Part II is about.\n\nTransactors: exactly one writes at a time. The standby is a parked process holding no lease.\n\nTwo details decide most operational questions later. A peer is a library, so adding a peer means starting another instance of the application: there is no server to size, and query capacity scales with the number of application instances you already run.\n\nAnd the transactor is not in the read path at all. Peers read storage directly. That is why a dead transactor is a write outage and nothing more, and why no amount of transactor capacity makes reads faster.\n\nFailure signature: if reads slow down while the transactor is busy, the two are contending for storage, not for the transactor.");
+  const s = slide("THE MAP", "Three moving parts",
+    "Before any of the four topics: the map, in its simplest form.\n\nThe peer is a library inside your application — queries run there, in your JVM, on data the peer pulls close. There is no query server.\n\nThe transactor is one process that all writes go through, in order.\n\nStorage — Postgres, DynamoDB, or similar — just keeps bytes. It is the only place the data lives.\n\nNotice what the arrows say: peers read storage directly, and never talk to the transactor to read. That one detail is why reads and writes live and die separately, which is the idea the whole class builds on.");
 
-  // peers
   [0, 1, 2].forEach(i => {
     const x = 2.4 + i * 2.6;
-    box(s, x, 1.44, 1.9, 0.72, { label: "peer", fill: C.coolBg, border: C.cool, size: 14 });
-    arrow(s, x + 0.95, 2.16, x + 0.95, 2.72, { color: C.cool, head: false });
-    arrow(s, x + 0.95, 3.08, x + 0.95, 3.85, { color: C.cool });
+    box(s, x, 1.5, 1.9, 0.75, { label: "peer", fill: C.coolBg, border: C.cool, size: 14 });
+    arrow(s, x + 0.95, 2.25, x + 0.95, 3.35, { color: C.cool });
   });
-  txt(s, "query runs HERE\n(your JVM)", { x: 8.9, y: 1.44, w: 3.6, h: 0.8, fontSize: 13, color: C.cool, bold: true });
+  txt(s, "queries run HERE\n(inside your app)", { x: 8.9, y: 1.5, w: 3.6, h: 0.8, fontSize: 13.5, color: C.cool, bold: true });
 
-  // memcached
-  box(s, 4.35, 2.72, 4.6, 0.62, { label: "memcached", fill: C.panel2, border: C.rule, size: 13 });
-  txt(s, "optional · shared", { x: 8.9, y: 2.78, w: 3.6, h: 0.4, fontSize: 12.5, color: C.meta });
+  box(s, 2.4, 3.35, 6.5, 0.9, { label: "STORAGE", fill: C.dark, size: 16, labelColor: C.white });
+  txt(s, "keeps the data\n(Postgres, DynamoDB…)", { x: 8.9, y: 3.35, w: 3.6, h: 0.8, fontSize: 13.5, color: C.ink, bold: true });
 
-  // storage
-  box(s, 2.4, 3.85, 6.5, 0.85, { label: "STORAGE", fill: C.dark, size: 16, labelColor: C.white });
-  txt(s, "source of truth\n…and the arbiter", { x: 8.9, y: 3.85, w: 3.6, h: 0.8, fontSize: 13, color: C.ink, bold: true });
+  box(s, 4.4, 5.05, 2.5, 0.8, { label: "transactor", fill: C.warnBg, border: C.warn, size: 14 });
+  arrow(s, 5.65, 5.05, 5.65, 4.25, { color: C.warn, label: "ALL writes", labelDx: 1.3, labelColor: C.warn });
+  txt(s, "one process — every\nwrite goes through it", { x: 8.9, y: 5.05, w: 3.6, h: 0.8, fontSize: 13.5, color: C.warn, bold: true });
 
-  // transactors
-  box(s, 3.1, 5.5, 2.3, 0.8, { label: "transactor", sub: "ACTIVE — holds the lease", fill: C.okBg, border: C.ok, size: 13, subSize: 9.5, subColor: C.ok });
-  box(s, 5.9, 5.5, 2.3, 0.8, { label: "standby", sub: "parked — no lease", fill: C.panel, border: C.rule, size: 13, subSize: 9.5 });
-  arrow(s, 4.25, 5.5, 4.25, 4.7, { color: C.ok });
-  arrow(s, 7.05, 5.5, 7.05, 4.7, { color: C.rule, dash: true });
-  txt(s, "exactly ONE writes", { x: 8.9, y: 5.6, w: 3.6, h: 0.4, fontSize: 13, color: C.ink, bold: true });
-
-  note(s, "Arrows point the way data is read. Only the active transactor writes.", 6.65);
+  takeaway(s, "Peers read storage directly — they never ask the transactor anything. Reads and writes are separate worlds.", 6.15);
+  cases(s, [
+    "Your app's JVM IS the query engine",
+    "Reads never touch the transactor",
+    "Storage is the only place the data lives",
+  ]);
 }
 
-// Failure table as cards
+// What breaks
 {
-  const s = slide("PART I · THE FAILURE MAP", "What each failure actually costs you",
-    "Read the four cards left to right, worst first.\n\nStorage: a total outage, and reads go down too — but only once the caches miss. A peer with a warm object cache keeps answering queries it can answer from cache for as long as its working set holds.\n\nTransactor: writes fail, reads continue. This is the failure people expect to be fatal and it is not.\n\nOne peer: that peer's traffic only. Siblings are unaffected because peers share nothing but storage.\n\nMemcached: nothing fails. Storage load goes up, latency goes up, correctness does not move.\n\nThe blast radius of a component is the blast radius of the state only it holds. Storage holds the only copy, so losing it loses everything. The transactor holds the right to write, which another process can take. A peer holds a cache, which rebuilds. Memcached holds a copy of a cache, which also rebuilds.\n\nStorage is the single component here whose state exists nowhere else, and that is exactly the one card marked as an outage.");
+  const s = slide("THE MAP", "What happens when each one dies",
+    "Three cards, worst first.\n\nStorage down: everything stops eventually. It is the only place the data lives, so this is the one real outage.\n\nTransactor down: writes stop, and reads keep working. This is the failure people expect to be fatal — and it is not, because peers never needed the transactor to read.\n\nOne peer down: only that peer's traffic. The other peers share nothing with it except storage.\n\nOnly one of the three failures is fatal. That reads and writes live and die separately is the single structural difference from a one-server SQL database — and it is the idea the rest of the class keeps returning to.");
 
   const cards = [
-    ["STORAGE", "total outage", "reads too, once the caches miss", C.badBg, C.bad, 4],
-    ["TRANSACTOR", "writes fail", "reads continue, unaffected", C.warnBg, C.warn, 2],
-    ["ONE PEER", "that peer only", "siblings unaffected", C.okBg, C.ok, 1],
-    ["MEMCACHED", "nothing fails", "storage load increases", C.okBg, C.ok, 1],
+    ["STORAGE", "everything stops", "the one real outage — the data lives only here", C.badBg, C.bad],
+    ["TRANSACTOR", "writes stop", "reads keep working — peers never needed it", C.warnBg, C.warn],
+    ["ONE PEER", "that peer only", "the others don't notice — nothing shared but storage", C.okBg, C.ok],
   ];
   cards.forEach((c, i) => {
-    const x = 0.6 + i * 3.1;
-    bar(s, x, 1.45, 2.9, 3.5, c[3], { round: true });
-    bar(s, x, 1.45, 2.9, 0.12, c[4], { round: true });
-    txt(s, c[0], { x: x + 0.25, y: 1.75, w: 2.4, h: 0.35, fontSize: 13, color: c[4], bold: true, charSpacing: 1.5 });
-    txt(s, c[1], { x: x + 0.25, y: 2.25, w: 2.4, h: 0.9, fontFace: F.serif, fontSize: 21, color: C.ink, fit: "shrink" });
-    txt(s, c[2], { x: x + 0.25, y: 3.25, w: 2.4, h: 0.9, fontSize: 13, color: C.body });
-    // severity meter
-    for (let k = 0; k < 4; k++) {
-      bar(s, x + 0.25 + k * 0.42, 4.45, 0.34, 0.16, k < c[5] ? c[4] : C.panel2);
-    }
-    txt(s, "blast radius", { x: x + 0.25, y: 4.65, w: 2.4, h: 0.25, fontSize: 10, color: C.meta });
-  });
-
-  takeaway(s, "Three of the four are not outages — that is the structural difference from a single-server SQL deployment.", 5.35);
-  waypoint(s, "waypoint — labs §1", "MEM",
-    "(d/basis-t (d/db conn))  ·  (d/q all-readings (d/db conn))  ·  (:datoms (d/db-stats (d/db conn)))\nA peer's position in time, its data, and its size — the three things you check first on any peer.",
-    { y: 6.05, h: 1.15 });
-}
-
-// SQL contrast
-{
-  const s = slide("PART I · THE FAILURE MAP", "Why that is different from one SQL server",
-    "On the left, one process is the query engine, the writer, the cache and the durability boundary at once, so every failure is the same failure. On the right, those four responsibilities live in different processes and fail separately.\n\nThe rest of the class follows from the split: Part II protects the write path only, Part III accelerates the read path only, and Part IV finds that the two words for 'parallelism' mean different mechanisms on each side.\n\nThe practical form of this is the on-call runbook. A single SQL server has one entry: the server is down, everything is down. Here there are four entries and three of them are degradations rather than outages — which means three of them can wait until business hours.");
-
-  panel(s, 0.6, 1.45, 5.85, 4.0, "ONE SQL SERVER", { strip: C.badBg, titleColor: C.bad });
-  box(s, 1.6, 2.2, 3.85, 2.6, { label: "the server", sub: "query engine + writer + cache + durability", fill: C.badBg, border: C.bad, size: 16, subSize: 11 });
-  txt(s, "one process, four responsibilities\n→ one failure mode", { x: 1.6, y: 4.95, w: 3.85, h: 0.5, fontSize: 13, color: C.bad, align: "center" });
-
-  panel(s, 6.85, 1.45, 5.85, 4.0, "DATOMIC", { strip: C.okBg, titleColor: C.ok });
-  const parts = [
-    ["query engine", "peer — local", C.coolBg, C.cool],
-    ["writer", "transactor — HA", C.okBg, C.ok],
-    ["cache", "4 tiers — Part III", C.panel, C.rule],
-    ["durability", "storage — replicate it", C.panel2, C.meta],
-  ];
-  parts.forEach((p, i) => {
-    box(s, 7.15, 2.1 + i * 0.72, 5.25, 0.6, {
-      label: p[0], fill: p[2], border: p[3], size: 13, align: "left",
-    });
-    txt(s, p[1], { x: 9.6, y: 2.1 + i * 0.72, w: 2.65, h: 0.6, fontSize: 11.5, color: C.body, align: "right", valign: "middle" });
-  });
-  txt(s, "four processes, four failure modes\n→ three of them survivable", { x: 7.15, y: 4.95, w: 5.25, h: 0.5, fontSize: 13, color: C.ok, align: "center" });
-
-  takeaway(s, "Separate processes fail separately. That is the whole operational thesis of this class.", 5.75);
-}
-
-// The asymmetry
-{
-  const s = slide("PART I · THE FAILURE MAP", "The asymmetry: reads fan out, writes funnel in",
-    "Reads are served by the peer itself, from caches and from storage. They are parallel and independent of the transactor — a peer whose transactor is dead still answers queries.\n\nWrites are serialised through one process. That is what buys you ACID transactions with no coordination protocol, and it is the reason the write path needs HA while the read path needs caching.\n\nHold on to this diagram: Part II is the left arrow, Part III the right one, and Part IV shows that 'parallelism' names a different mechanism on each side.\n\nWhy writes funnel, stated precisely: transaction functions, uniqueness and cardinality checks all run against the current value of the database, so the transactor has to know the exact predecessor of every transaction. That is a serial dependency in the semantics, not an implementation limit. What it buys is transactions with no two-phase commit, no consensus round and no lock manager, because there is nothing to coordinate. What it costs is a throughput ceiling and a component that needs HA.\n\nWhy reads fan out: a database value is immutable, so any number of readers can hold any number of points in time with no coordination. Nothing one reader does can change what another sees.");
-
-  // reads
-  panel(s, 0.6, 1.45, 5.85, 4.3, "READS  —  fan out");
-  box(s, 2.55, 2.05, 1.95, 0.62, { label: "clients", fill: C.panel2, size: 13 });
-  [0, 1, 2].forEach(i => {
-    const x = 0.95 + i * 1.85;
-    arrow(s, 3.5, 2.67, x + 0.75, 3.2, { color: C.cool });
-    box(s, x, 3.2, 1.5, 0.62, { label: "peer", fill: C.coolBg, border: C.cool, size: 12 });
-    arrow(s, x + 0.75, 3.82, x + 0.75, 4.45, { color: C.cool, dash: true });
-  });
-  box(s, 0.95, 4.45, 5.15, 0.6, { label: "caches, then storage", fill: C.dark, labelColor: C.white, size: 12 });
-  txt(s, "parallel · independent of the transactor", { x: 0.95, y: 5.15, w: 5.15, h: 0.4, fontSize: 12.5, color: C.cool, align: "center", bold: true });
-
-  // writes
-  panel(s, 6.85, 1.45, 5.85, 4.3, "WRITES  —  funnel in");
-  [0, 1, 2].forEach(i => {
-    const x = 7.2 + i * 1.85;
-    box(s, x, 2.05, 1.5, 0.62, { label: "peer", fill: C.panel, border: C.rule, size: 12 });
-    arrow(s, x + 0.75, 2.67, 9.78, 3.2, { color: C.warn });
-  });
-  box(s, 8.5, 3.2, 2.55, 0.62, { label: "ONE transactor", fill: C.warnBg, border: C.warn, size: 13 });
-  arrow(s, 9.78, 3.82, 9.78, 4.45, { color: C.warn });
-  box(s, 7.2, 4.45, 5.15, 0.6, { label: "log, then indexes", fill: C.dark, labelColor: C.white, size: 12 });
-  txt(s, "serialised · ordered · transactional", { x: 7.2, y: 5.15, w: 5.15, h: 0.4, fontSize: 12.5, color: C.warn, align: "center", bold: true });
-
-  takeaway(s, "HA protects the write path. Caching accelerates the read path. Neither one helps the other.", 6.0);
-}
-
-// db-stats clarification
-{
-  const s = slide("PART I · THE FAILURE MAP", "One clarification before anyone tunes anything",
-    "People reach for d/db-stats expecting a cache report. It is a database report: how many datoms exist, by attribute. It says nothing about what is resident in any cache.\n\nThere is no peer API that reports cache occupancy. Cache behaviour is observed one of two ways: through the metrics callback (Part V), or by timing the same query twice and comparing. Both appear later in this class.\n\nThe failure signature this prevents: we added a cache tier and db-stats did not change. It would not. db-stats counts datoms, and the datom count does not depend on caching. The measurements that would show the change are query timing and the memcached hit ratio in Part V.");
-
-  panel(s, 0.6, 1.45, 5.85, 2.6, "WHAT d/db-stats TELLS YOU");
-  codeBlock(s, "(:datoms (d/db-stats (d/db conn)))\n;; => 20301", 0.85, 2.05, 5.35, 1.0);
-  txt(s, "The size of the DATABASE — how many\ndatoms exist, and by which attribute.",
-    { x: 0.85, y: 3.2, w: 5.35, h: 0.7, fontSize: 13.5, color: C.body });
-
-  panel(s, 6.85, 1.45, 5.85, 2.6, "WHAT NO API TELLS YOU", { strip: C.badBg, titleColor: C.bad });
-  box(s, 7.1, 2.05, 5.35, 1.0, { label: "cache occupancy", sub: "not reported by any peer API", fill: C.badBg, border: C.bad, size: 15, subSize: 11.5, subColor: C.bad });
-  txt(s, "How much of the working set is resident,\nand in which tier.",
-    { x: 7.1, y: 3.2, w: 5.35, h: 0.7, fontSize: 13.5, color: C.body });
-
-  txt(s, "So cache behaviour is OBSERVED, not queried:", { x: 0.6, y: 4.35, w: 12.1, h: 0.4, fontSize: 14, color: C.ink, bold: true });
-  box(s, 0.6, 4.85, 5.85, 0.85, { label: "metrics callback  →  Part V", fill: C.panel, border: C.rule, size: 14 });
-  box(s, 6.85, 4.85, 5.85, 0.85, { label: "time the same query twice", fill: C.panel, border: C.rule, size: 14 });
-
-  takeaway(s, "d/db-stats measures the database. Timing and metrics measure the cache.", 6.1);
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// PART II · HIGH AVAILABILITY
-// ═══════════════════════════════════════════════════════════════════
-
-sectionSlide("II", "High availability", "Two transactors · one lease · storage as the arbiter",
-  "The whole of Datomic HA is one idea: the right to write is a lease, and the lease lives in storage. Everything else — no quorum, no consensus protocol, no split brain, no virtual IP, no failover controller — is a consequence of that one decision.\n\nA lease is a claim on storage with an expiry. The holder renews it; when renewal stops, the claim expires and another process may take it. The correctness argument is one sentence: only storage grants the lease, and storage does not disagree with itself, so two processes cannot both hold it. No quorum is needed because there is no distributed decision to make.");
-
-// The lease
-{
-  const s = slide("PART II · HIGH AVAILABILITY", "Datomic HA is a lease, not a cluster",
-    "Two identical transactor processes point at the same storage. One of them holds a lease; the other polls and waits.\n\nStorage is the arbiter. That matters because the lease lives where the data lives — so 'who is the writer' and 'what is committed' are decided by the same system and cannot disagree. A split brain would require storage to disagree with itself.\n\nThere is no separate failover controller, no virtual IP, and nothing for you to operate between the two processes.\n\nOperational note: a standby that is working correctly prints nothing after startup. A silent standby log is the expected state, not a symptom.\n\nThe mechanism in full: the active transactor refreshes a heartbeat in storage on an interval, and the standby polls the same location. When the heartbeat goes stale for long enough, the standby takes the lease and begins writing. That is the entire protocol.\n\nWhy storage rather than a consensus protocol: every transaction already funnels through storage, so storage is already the serialisation point. Making it the arbiter adds no new dependency and no new failure mode.\n\nFailure signature: two transactors that never fail over are usually pointed at different storage. The identical sql-url in the standby properties file is not a copy-paste convenience — it is the mechanism.");
-
-  box(s, 1.0, 1.8, 2.6, 0.9, { label: "transactor A", sub: "holds the lease", fill: C.okBg, border: C.ok, size: 14, subSize: 11, subColor: C.ok });
-  box(s, 1.0, 4.3, 2.6, 0.9, { label: "transactor B", sub: "waits", fill: C.panel, border: C.rule, size: 14, subSize: 11 });
-
-  box(s, 5.1, 2.7, 3.2, 1.6, { label: "STORAGE", sub: "the lease lives here", fill: C.dark, labelColor: C.white, size: 18, subSize: 12, subColor: C.goldHi });
-
-  arrow(s, 3.6, 2.25, 5.1, 3.1, { color: C.ok, label: "writes", labelDy: -0.22 });
-  arrow(s, 3.6, 4.75, 5.1, 3.95, { color: C.rule, dash: true, label: "polls", labelDy: 0.22 });
-
-  [0, 1, 2].forEach(i => {
-    box(s, 10.0, 1.8 + i * 0.75, 1.6, 0.6, { label: "peer", fill: C.coolBg, border: C.cool, size: 12 });
-    arrow(s, 10.0, 2.1 + i * 0.75, 8.3, 3.2, { color: C.cool, head: false });
-  });
-  txt(s, "peers find the active\ntransactor HERE", { x: 8.7, y: 4.45, w: 4.0, h: 0.7, fontSize: 13, color: C.cool, bold: true, align: "center" });
-
-  const nots = ["no quorum", "no consensus protocol", "no split brain", "no virtual IP"];
-  nots.forEach((n, i) => {
-    bar(s, 0.6 + i * 3.1, 5.55, 2.9, 0.5, C.panel2, { round: true });
-    txt(s, "✕  " + n, { x: 0.6 + i * 3.1, y: 5.55, w: 2.9, h: 0.5, fontSize: 13, color: C.meta, align: "center", valign: "middle" });
-  });
-
-  takeaway(s, "The lease lives where the data lives, so the writer and the commit log cannot disagree.", 6.25);
-}
-
-// Failover timeline
-{
-  const s = slide("PART II · HIGH AVAILABILITY", "What a failover looks like from outside",
-    "Two tracks, same wall clock.\n\nThe write track has a gap: from the moment A dies to the moment B has the lease, transactions fail. The read track has no gap at all — peers are reading storage and their own caches, and neither one noticed.\n\nThe peer reconnects on its own. No URI change, no restart, no load balancer entry to flip.\n\nThe width of that window depends on heartbeat-interval-msec, on storage latency, and on how warm the standby's JVM is. That is three environment-specific variables, so the width is a measured number from a given environment rather than a quoted constant.\n\nWhy the read track has no gap: peers never asked the transactor anything to begin with. They read storage and their own caches, and they notice the transactor only when they submit a transaction.\n\nWhat a caller sees during the window depends on which side it is on. A writer fails or hangs, decided by txTimeoutMsec two slides on. A reader gets the last t the peer knows about, which is a real and consistent database value — an answer to a slightly older question, not an error.");
-
-  // write track
-  txt(s, "WRITES", { x: 0.6, y: 1.85, w: 1.4, h: 0.4, fontSize: 13, color: C.ink, bold: true, charSpacing: 1 });
-  const tx = 2.2, tw = 10.2;
-  for (let i = 0; i < 20; i++) {
-    const failing = i >= 7 && i <= 11;
-    bar(s, tx + i * (tw / 20), 1.80, tw / 20 - 0.06, 0.5, failing ? C.bad : C.ok, { round: true });
-  }
-  bar(s, tx + 7 * (tw / 20), 2.40, 5 * (tw / 20) - 0.06, 0.1, C.bad);
-  txt(s, "the window — writes fail", {
-    x: tx + 6.4 * (tw / 20), y: 2.55, w: 3.4, h: 0.35, fontSize: 12.5, color: C.bad, align: "center", bold: true,
-  });
-  txt(s, "A dies", { x: tx + 5.6 * (tw / 20), y: 1.45, w: 1.6, h: 0.35, fontSize: 12, color: C.bad, align: "center" });
-  txt(s, "B has the lease", { x: tx + 10.4 * (tw / 20), y: 1.45, w: 2.4, h: 0.35, fontSize: 12, color: C.ok, align: "center" });
-
-  // read track
-  txt(s, "READS", { x: 0.6, y: 3.05, w: 1.4, h: 0.4, fontSize: 13, color: C.ink, bold: true, charSpacing: 1 });
-  for (let i = 0; i < 20; i++) {
-    bar(s, tx + i * (tw / 20), 3.0, tw / 20 - 0.06, 0.5, C.cool, { round: true });
-  }
-  txt(s, "uninterrupted — peers never asked the transactor anything", {
-    x: tx, y: 3.6, w: tw, h: 0.35, fontSize: 12.5, color: C.cool,
-  });
-
-  txt(s, "The peer reconnects by itself:", { x: 0.6, y: 4.15, w: 12.1, h: 0.35, fontSize: 14, color: C.ink, bold: true });
-  ["no URI change", "no peer restart", "no load balancer"].forEach((t, i) => {
-    box(s, 0.6 + i * 4.05, 4.55, 3.85, 0.55, { label: "✓  " + t, fill: C.okBg, border: C.ok, size: 13, labelColor: C.ok });
-  });
-
-  waypoint(s, "waypoint — labs §2", "PRO",
-    "Start (writer-loop!), then  pkill -f pg-transactor.properties, then read (failover-report @timeline).\nThat number is the write-availability SLO for this environment.",
-    { y: 5.35, h: 1.2 });
-  note(s, "The window depends on heartbeat-interval-msec, storage latency, and standby JVM warmth. Measure it where you run it.", 6.7);
-}
-
-// What a standby covers
-{
-  const s = slide("PART II · HIGH AVAILABILITY", "What a standby covers — and what it does not",
-    "The left column is what you get. The right column is what people assume they got and did not.\n\nA standby is not a second copy of the data: both transactors write to the same storage, so storage loss loses everything either of them wrote. Data redundancy is storage replication's job — Postgres streaming replication, DynamoDB's own durability, whatever your storage offers.\n\nA standby also does not protect you from a bad transaction. Once it is committed, it is committed; recovery is restore, covered in the Production class §4.\n\nThe rolling-upgrade line on the left is the one people undersell: the same mechanism that survives a crash lets you upgrade the transactor on purpose for the cost of one bounded write pause.\n\nWorth being precise about three words that get used interchangeably. Availability is what HA buys — someone can still write. Durability is what storage replication buys — the bytes survive. Recoverability is what backup buys — you can go back to a state before a mistake. Three mechanisms, three different failures.\n\nFailure signature: a deployment with a standby transactor and unreplicated storage has bought a shorter write pause and no protection whatsoever against losing the database.");
-
-  panel(s, 0.6, 1.45, 5.85, 3.6, "COVERS", { strip: C.okBg, titleColor: C.ok });
-  [["a bounded write pause", "measured, not unbounded"],
-   ["unattended recovery", "no operator in the loop"],
-   ["rolling transactor upgrades", "on purpose, same mechanism"]].forEach((r, i) => {
-    box(s, 0.85, 2.05 + i * 0.95, 5.35, 0.8, { label: "✓  " + r[0], sub: r[1], fill: C.okBg, border: C.ok, size: 14, subSize: 11, labelColor: C.ink, align: "left" });
-  });
-
-  panel(s, 6.85, 1.45, 5.85, 3.6, "DOES NOT COVER", { strip: C.badBg, titleColor: C.bad });
-  [["a second copy of the data", "both write the same storage"],
-   ["storage loss", "storage replication's job"],
-   ["a bad transaction", "restore — Production class §4"]].forEach((r, i) => {
-    box(s, 7.1, 2.05 + i * 0.95, 5.35, 0.8, { label: "✕  " + r[0], sub: r[1], fill: C.badBg, border: C.bad, size: 14, subSize: 11, labelColor: C.ink, align: "left" });
-  });
-
-  takeaway(s, "HA buys you a bounded pause. Durability is bought separately, from your storage.", 5.35);
-  note(s, "Both transactors write the same storage — that is the point of the lease, and the limit of the guarantee.", 6.15);
-}
-
-// txTimeoutMsec dial
-{
-  const s = slide("PART II · HIGH AVAILABILITY", "The peer-side dial that shapes the pause",
-    "During the failover window a write has to do something. datomic.txTimeoutMsec decides what: how long a peer's write waits for a writer to exist before giving up.\n\nThere is no correct value, only a choice about which failure your application handles better. A short timeout gives you fast, explicit failures and free threads — your callers see errors during the window. A long timeout gives you writes that survive the window — at the cost of threads parked in the peer, which under load is its own outage.\n\nPick the end of the dial your caller can actually handle, then measure the window (previous waypoint) and make sure a long timeout is actually longer than it.\n\nMechanism: the flag bounds how long a peer blocks in d/transact when no transactor holds the lease. It does not retry faster or make failover happen sooner. It only decides when the peer gives up.\n\nFailure signature for a value set too long: during a failover the peer's threads fill with parked writers, the pool exhausts, and the process stops serving reads as well. A bounded write-path pause has become a read-path outage. That is the failure people do not anticipate, and the reason a long timeout needs a bounded pool behind it.");
-
-  codeBlock(s, "-Ddatomic.txTimeoutMsec=<ms>       ;; how long a write waits for a writer to exist", 0.6, 1.45, 12.1, 0.62);
-
-  // the dial
-  bar(s, 2.0, 2.9, 9.3, 0.16, C.panel2);
-  arrow(s, 2.0, 2.98, 11.3, 2.98, { color: C.rule, head: false });
-  box(s, 1.3, 2.5, 1.4, 0.95, { label: "SHORT", fill: C.warnBg, border: C.warn, size: 13 });
-  box(s, 10.6, 2.5, 1.4, 0.95, { label: "LONG", fill: C.coolBg, border: C.cool, size: 13 });
-
-  panel(s, 1.3, 3.75, 5.1, 2.2, "IF SHORT", { strip: C.warnBg, titleColor: C.warn });
-  bullets(s, ["more failed writes, visible to the caller", "fewer stalled peer threads", "the window becomes an error rate"],
-    { x: 1.55, y: 4.3, w: 4.6, h: 1.5, size: 13 });
-
-  panel(s, 6.9, 3.75, 5.1, 2.2, "IF LONG", { strip: C.coolBg, titleColor: C.cool });
-  bullets(s, ["writes survive the window", "threads park in the peer", "the window becomes a latency spike"],
-    { x: 7.15, y: 4.3, w: 4.6, h: 1.5, size: 13 });
-
-  takeaway(s, "Tuning this is choosing which failure your callers handle better — not finding a right value.", 6.2);
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// PART III · THE COST OF A READ
-// ═══════════════════════════════════════════════════════════════════
-
-sectionSlide("III", "The cost of a read", "Four tiers · the segment · and the cold peer after a deploy",
-  "Every read walks down a ladder until some tier answers. Knowing which tier answered is the whole skill: the same query is a hundred nanoseconds or ten milliseconds depending on nothing but residency.\n\nOne thing to establish before the ladder: there is no query cache and no result cache anywhere in Datomic. The only thing cached is the segment, a block of the index. So caching is entirely a question of which blocks are resident, and never a question of which queries were asked before.");
-
-// Four tiers
-{
-  const s = slide("PART III · THE COST OF A READ", "Four tiers — a read walks down until one answers",
-    "Read the ladder top to bottom, and read the right-hand column as orders of magnitude rather than as benchmark numbers.\n\nTier 1, the object cache, is on-heap and holds decoded segments — nothing to deserialise, which is why it is nanoseconds to microseconds.\n\nTier 2, valcache, is the addition in this class: local SSD, per peer. Its latency is not the interesting part. The interesting part is that it is the only tier that survives a process restart, which is exactly the event that empties the others.\n\nTier 3, memcached, is shared over the network. Its value is not its speed but its sharing: twenty cold peers cause one storage miss instead of twenty.\n\nTier 4 is storage, and storage is metered — in dollars on DynamoDB, in connections and IOPS on Postgres.\n\nWhy a ladder rather than one cache: each tier trades latency for a property the tier above lacks. Tier 1 is the fastest and dies with the process. Tier 2 is slower and survives a restart. Tier 3 is slower still and is shared between processes. Storage is the slowest and is the only one that is authoritative.\n\nThe reason the ladder needs no coherence protocol: segments are immutable and content-addressed. A segment that is present is correct, at every tier, forever. Nothing is ever invalidated, and no tier can serve a stale answer. That is what makes it safe to stack four independent caches with no protocol between them.");
-
-  const tiers = [
-    ["1", "object cache", "on-heap, decoded segments", "ns … µs", C.dark, C.white, 0.9],
-    ["2", "valcache", "local SSD, per peer", "~100s of µs", C.gold, C.white, 1.0],
-    ["3", "memcached", "shared, over the network", "~1 ms", C.panel2, C.ink, 1.0],
-    ["4", "storage", "Postgres / DynamoDB / S3", "ms, and metered", C.panel, C.ink, 1.0],
-  ];
-  let y = 1.5;
-  tiers.forEach((t, i) => {
-    const h = 0.85;
-    const indent = i * 0.35;
-    bar(s, 1.5 + indent, y, 8.2 - indent, h, t[4], { round: true });
-    txt(s, t[0], { x: 1.75 + indent, y, w: 0.5, h, fontSize: 20, fontFace: F.serif, color: t[5], valign: "middle" });
-    txt(s, t[1], { x: 2.35 + indent, y, w: 2.9, h, fontSize: 16, color: t[5], bold: true, valign: "middle", fit: "shrink" });
-    txt(s, t[2], { x: 5.3, y, w: 4.3, h, fontSize: 12.5, color: t[5] === C.white ? C.rule : C.body, valign: "middle", fit: "shrink" });
-    txt(s, t[3], { x: 10.0, y, w: 2.7, h, fontFace: F.mono, fontSize: 14, color: C.ink, valign: "middle", align: "right" });
-    if (i < 3) arrow(s, 1.15, y + h, 1.15, y + h + 0.2, { color: C.gold, width: 1.2 });
-    y += h + 0.2;
-  });
-  txt(s, "miss\n↓", { x: 0.55, y: 3.0, w: 0.6, h: 0.7, fontSize: 11, color: C.gold, align: "center" });
-
-  bar(s, 1.85, 5.3, 8.5, 0.55, C.coolBg, { round: true });
-  txt(s, "Tier 2 is the addition in this class — and it is the only tier that survives a process restart.",
-    { x: 2.05, y: 5.3, w: 8.1, h: 0.55, fontSize: 13, color: C.cool, valign: "middle", bold: true, fit: "shrink" });
-
-  takeaway(s, "Latency is not a property of the query. It is a property of which tier had the segment.", 6.15);
-}
-
-// Tier properties
-{
-  const s = slide("PART III · THE COST OF A READ", "Choosing tiers: what each one actually buys",
-    "Use this as the sizing conversation. Four columns, four different reasons to add a tier.\n\nThe object cache is the only one that is always there, and it is the only one that is free. It is also the one most often left at its default.\n\nValcache buys restart survival. Memcached buys sharing across peers. Storage is the tier you are trying not to reach.\n\nNote the last row: only memcached is shared. That is the whole reason it exists, and the reason its hit ratio is a signal worth alerting on in Part V.\n\nSizing order follows what each tier costs. Object cache first, because it costs heap you have already allocated and is the only free tier. Then choose between the two paid tiers by the failure being addressed: frequent restarts point at valcache, a large fleet points at memcached.\n\nFailure signature for an undersized object cache: latency that is bimodal rather than uniformly high — most calls fast, a minority slow, with the proportion moving as the working set shifts. A single average hides it completely.");
-
-  const cols = ["object cache", "valcache", "memcached", "storage"];
-  const rows = [
-    ["where",              ["JVM heap", "local SSD", "network", "the database"]],
-    ["survives restart?",  ["no", "YES", "yes (shared)", "n/a"]],
-    ["shared across peers?", ["no", "no", "YES", "yes"]],
-    ["costs",              ["heap", "disk", "a server", "money / IOPS"]],
-    ["turned on by",       ["objectCacheMax", "valcachePath", "memcachedServers", "always on"]],
-  ];
-  const x0 = 3.4, colW = 2.35;
-  cols.forEach((c, i) => {
-    bar(s, x0 + i * colW, 1.45, colW - 0.12, 0.55, i === 0 ? C.dark : C.panel2, { round: true });
-    txt(s, c, { x: x0 + i * colW, y: 1.45, w: colW - 0.12, h: 0.55, fontSize: 12.5, bold: true,
-      color: i === 0 ? C.white : C.ink, align: "center", valign: "middle", fit: "shrink" });
-  });
-  rows.forEach((r, ri) => {
-    const y = 2.15 + ri * 0.72;
-    bar(s, 0.6, y, 12.1, 0.62, ri % 2 ? C.bg : C.panel);
-    txt(s, r[0], { x: 0.8, y, w: 2.5, h: 0.62, fontSize: 13, color: C.ink, bold: true, valign: "middle", fit: "shrink" });
-    r[1].forEach((v, ci) => {
-      const hot = v === "YES";
-      txt(s, v, {
-        x: x0 + ci * colW, y, w: colW - 0.12, h: 0.62,
-        fontSize: ri === 4 ? 11 : 13, fontFace: ri === 4 ? F.mono : F.sans,
-        color: hot ? C.ok : C.body, bold: hot, align: "center", valign: "middle", fit: "shrink",
-      });
-    });
-  });
-
-  takeaway(s, "Size the object cache first — it is free. Add valcache for restarts, memcached for fleets.", 6.05);
-}
-
-// The segment
-{
-  const s = slide("PART III · THE COST OF A READ", "The unit of caching is a segment — not an entity, not a row",
-    "You ask for one entity. The peer does not fetch one entity: it fetches the segment that entity's datoms live in, and neighbours in the index come along for free. The index-range call on the next line proves it — twenty readings, one segment, one storage hit.\n\nThe consequence for sizing is direct: the working set is measured in segments, not in entities. A workload that touches a thousand entities scattered across the index is expensive; a workload that touches ten thousand adjacent ones may be cheap. Cache sizing follows the segments a workload touches rather than the entities it names.\n\nIt also explains why sorted access patterns — index-range, reverse chronological scans — behave differently from random entity lookup.\n\nThe mechanism underneath: an index is a sorted tree whose leaves are segments holding many datoms. The peer's unit of transfer and of caching is the leaf. Nothing in the system can fetch a single datom.\n\nSo access-pattern shape matters more than data volume. A query touching a thousand entities adjacent in the index may load a handful of segments; the same thousand entities scattered across it may load a thousand. Same result, same datom count, an order of magnitude apart in storage traffic.\n\nFailure signature: adding a cache tier changed nothing, and the access pattern is random along a dimension nothing is indexed by. Cache tiers do not fix a scattered access pattern. Changing what is indexed does.");
-
-  txt(s, "You ask for one entity …", { x: 0.6, y: 1.4, w: 5.8, h: 0.35, fontSize: 14, color: C.ink, bold: true });
-  codeBlock(s, "(d/pull db '[*] some-e)", 0.6, 1.8, 5.8, 0.6);
-
-  txt(s, "… the peer fetches the segment it lives in.", { x: 6.9, y: 1.4, w: 5.8, h: 0.35, fontSize: 14, color: C.ink, bold: true });
-  codeBlock(s, "(count (seq (d/index-range db\n  :reading/t 4240 4260)))   ;; => 20", 6.9, 1.8, 5.8, 0.85);
-
-  // index strip
-  txt(s, "AVET index, ordered by :reading/t", { x: 0.6, y: 3.0, w: 6.0, h: 0.3, fontSize: 12, color: C.meta });
-  const segs = 5, sw = 2.34;
-  for (let i = 0; i < segs; i++) {
-    const x = 0.6 + i * sw;
-    const hot = i === 2;
-    bar(s, x, 3.35, sw - 0.12, 1.15, hot ? C.goldHi : C.panel, { round: true });
-    txt(s, "segment " + (i + 1), { x, y: 3.42, w: sw - 0.12, h: 0.3, fontSize: 11, color: hot ? C.dark : C.meta, align: "center" });
-    for (let k = 0; k < 5; k++) {
-      bar(s, x + 0.18 + k * 0.4, 3.85, 0.3, 0.45, hot ? C.dark : C.panel2);
-    }
-  }
-  arrow(s, 3.1, 2.55, 3.1, 3.3, { color: C.gold, label: "asked for one datom", labelW: 2.6, labelDx: -1.5 });
-  bar(s, 5.28, 4.6, 2.22, 0.1, C.gold);
-  txt(s, "one segment loaded — 20 neighbours came along free", { x: 4.3, y: 4.75, w: 6.0, h: 0.35, fontSize: 13, color: C.gold, bold: true, align: "center" });
-
-  takeaway(s, "Working sets are measured in segments. Size caches for the segments a workload touches, not the entities it names.", 5.25);
-  waypoint(s, "waypoint — labs §3", "MEM",
-    "The segment demo needs no infrastructure — segmentation is a property of the index, not of the cache.\nRun it before adding any tier — a scattered access pattern is not fixed by a cache tier.",
-    { y: 5.95, h: 1.2 });
-}
-
-// Cold peers
-{
-  const s = slide("PART III · THE COST OF A READ", "The cold-peer thundering herd, right after a deploy",
-    "Twenty peers restart together. Twenty object caches are empty at the same instant. Twenty peers ask storage the same questions in the same second.\n\nOn Postgres you watch it in pg_stat_database: blks_hit collapses and blks_read spikes. On DynamoDB you watch it on the bill, or in throttling.\n\nNothing is broken. Every peer is correct, every query returns, and p99 goes through the roof — which is why this shows up as a mysterious post-deploy latency incident rather than as an error.\n\nThe three mitigations are ordered by what they require. Rolling deploys require no infrastructure at all.\n\nWhy this is a herd rather than N independent slow starts: the peers are identical, restarted together, serving the same traffic, so they miss on the same segments in the same order at the same moment. Storage sees N times its normal miss rate for the length of the warm-up, which is precisely when its own latency is worst. The peers make each other slower.\n\nFailure signature: latency spikes correlated with deploys, no errors anywhere, and the problem resolves by itself in a few minutes. It is routinely diagnosed as a bad release and rolled back, which restarts every peer again.");
-
-  txt(s, "BEFORE DEPLOY", { x: 1.2, y: 1.45, w: 5.0, h: 0.35, fontSize: 13, color: C.ok, bold: true, charSpacing: 1 });
-  barCompare(s, 1.2, 1.9, 5.0, [
-    ["blks_hit",  90, "warm", C.ok],
-    ["blks_read", 10, "few",  C.panel2],
-  ], { labelW: 1.5, rowH: 0.55 });
-
-  txt(s, "AFTER DEPLOY", { x: 7.2, y: 1.45, w: 5.0, h: 0.35, fontSize: 13, color: C.bad, bold: true, charSpacing: 1 });
-  barCompare(s, 7.2, 1.9, 5.0, [
-    ["blks_hit",  12, "cold",  C.panel2],
-    ["blks_read", 100, "spike", C.bad],
-  ], { labelW: 1.5, rowH: 0.55 });
-
-  fatArrow(s, 6.3, 2.1, 0.75, 0.7, pres.shapes.RIGHT_ARROW, { fill: C.rule });
-  txt(s, "every peer, cold, simultaneously — nothing is broken, and p99 triples",
-    { x: 0.6, y: 3.15, w: 12.1, h: 0.35, fontSize: 13.5, color: C.ink, align: "center", italic: true });
-
-  const mits = [
-    ["memcached", "one shared miss instead of N", "needs a server", C.coolBg, C.cool],
-    ["valcache", "survives the restart that caused it", "needs a disk", C.warnBg, C.warn],
-    ["rolling deploys", "don't replace 20 peers at once", "needs nothing", C.okBg, C.ok],
-  ];
-  mits.forEach((m, i) => {
     const x = 0.6 + i * 4.07;
-    bar(s, x, 3.65, 3.87, 1.55, m[3], { round: true });
-    txt(s, String(i + 1), { x: x + 0.2, y: 3.78, w: 0.4, h: 0.35, fontFace: F.serif, fontSize: 17, color: m[4], bold: true });
-    txt(s, m[0], { x: x + 0.7, y: 3.8, w: 3.0, h: 0.35, fontSize: 15, color: C.ink, bold: true });
-    txt(s, m[1], { x: x + 0.7, y: 4.2, w: 3.0, h: 0.6, fontSize: 12.5, color: C.body });
-    txt(s, "(" + m[2] + ")", { x: x + 0.7, y: 4.85, w: 3.0, h: 0.3, fontSize: 11.5, color: m[4], italic: true });
+    bar(s, x, 1.5, 3.87, 3.3, c[3], { round: true });
+    bar(s, x, 1.5, 3.87, 0.12, c[4], { round: true });
+    txt(s, c[0], { x: x + 0.3, y: 1.85, w: 3.3, h: 0.35, fontSize: 14, color: c[4], bold: true, charSpacing: 1.5 });
+    txt(s, c[1], { x: x + 0.3, y: 2.35, w: 3.3, h: 0.9, fontFace: F.serif, fontSize: 24, color: C.ink, fit: "shrink" });
+    txt(s, c[2], { x: x + 0.3, y: 3.45, w: 3.3, h: 1.1, fontSize: 13, color: C.body });
   });
 
-  waypoint(s, "waypoint — labs §3", "PRO",
-    "Add valcache with two -D flags, restart the REPL, re-run the cold query. Then set datomic.objectCacheMax=32m\nand re-run the warm one. The gap between those two measurements is the object-cache sizing signal for this dataset.",
-    { y: 5.4, h: 1.25 });
+  takeaway(s, "Only storage is fatal. Reads and writes live and die separately — the rest of the class builds on this.", 5.25);
+  prose(s, "This is the structural difference from a single SQL server, where the query engine, the writer and the data share one process and therefore one failure. Here they are three processes with three separate failures — and two of the three are degradations, not outages.",
+    { y: 5.95, h: 0.9 });
+  cases(s, [
+    "Transactor OOM: dashboards keep rendering, saves fail",
+    "One peer OOM: one pod restarts, siblings never notice",
+  ]);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PART I · READS
+// ═══════════════════════════════════════════════════════════════════
+
+sectionSlide("I", "Reads", "A query runs in your process, on data pulled close",
+  "The basics first: where a read actually happens, and why its cost is entirely a question of where the data is at that moment. Then one easy example — the same query timed twice — and the three catches: cold peers, reading your own writes, and the one-core query.",
+  "A Datomic query does not go to a server. It runs inside your application, on data the peer pulls close and keeps. So the cost of a read has almost nothing to do with the query engine — it is dominated by one question: is the data already here, or does it have to be fetched?");
+
+// How a read works
+{
+  const s = slide("PART I · READS", "How a read works",
+    "Walk the flowchart. Your code asks a query. The peer checks whether the data is already local.\n\nIf yes, the answer comes from memory — effectively instant, and nothing else in the system is involved.\n\nIf no, the peer fetches the data from storage — milliseconds — and, crucially, KEEPS it. The next query over the same data takes the fast path.\n\nThe example is the whole story in two lines: the same query, run twice, is 120 ms and then 2 ms. Nothing about the query changed. Only where the data was.\n\nAnd note what is absent from the picture entirely: the transactor. Reads never touch it.");
+
+  box(s, 0.6, 1.55, 2.6, 0.8, { label: "your query", fill: C.coolBg, border: C.cool, size: 14 });
+  arrow(s, 3.2, 1.95, 4.3, 1.95, { color: C.cool });
+  box(s, 4.3, 1.55, 3.4, 0.8, { label: "data already here?", fill: C.panel, border: C.rule, size: 14 });
+  arrow(s, 7.7, 1.95, 8.8, 1.95, { color: C.ok, label: "yes", labelDy: -0.25, labelColor: C.ok });
+  box(s, 8.8, 1.55, 3.7, 0.8, { label: "answer from memory", sub: "~instant", fill: C.okBg, border: C.ok, size: 13.5, subSize: 10.5, subColor: C.ok });
+  arrow(s, 6.0, 2.35, 6.0, 3.1, { color: C.warn, label: "no", labelDx: -0.9, labelColor: C.warn });
+  box(s, 4.3, 3.1, 3.4, 0.8, { label: "fetch from storage", sub: "milliseconds", fill: C.warnBg, border: C.warn, size: 13.5, subSize: 10.5, subColor: C.warn });
+  arrow(s, 7.7, 3.5, 8.8, 3.5, { color: C.warn });
+  box(s, 8.8, 3.1, 3.7, 0.8, { label: "KEEP it, then answer", sub: "next time: fast path", fill: C.panel2, border: C.rule, size: 13.5, subSize: 10.5 });
+
+  codeBlock(s,
+    "(time (d/q readings-q db))   ;; 1st run: ~120 ms — fetching from storage\n(time (d/q readings-q db))   ;; 2nd run:   ~2 ms — data is already local",
+    0.6, 4.35, 12.1, 1.0);
+
+  takeaway(s, "A read costs whatever FETCHING costs. Once the data is local, reads are nearly free.", 5.65);
+  note(s, "The transactor appears nowhere in this picture — reads never involve it.", 6.3);
+  cases(s, [
+    "Same query, twice: 120 ms then 2 ms — only the data's location changed",
+    "A read that finds everything local costs storage nothing",
+  ]);
+}
+
+// Warm vs cold
+{
+  const s = slide("PART I · READS", "The broad picture: warm vs cold",
+    "This is the only performance distinction worth carrying around for reads.\n\nA warm peer — data already local — answers in milliseconds or less. A cold peer — nothing local yet — pays a storage fetch for everything it touches, and the same query can be a hundred times slower.\n\nSame query, same data, same code. The difference is only where the data is when the query runs.\n\nThe consequence: most read-performance work in Datomic is really cache work, which is why caches get their own section (Part IV). When a read is slow, the first question is never 'is the query bad' — it is 'which of these two bars am I on, and why'.");
+
+  barCompare(s, 0.9, 1.7, 11.4, [
+    ["warm peer", 4, "~ms", C.ok],
+    ["cold peer", 100, "~100×", C.bad],
+  ], { labelW: 2.0, rowH: 0.7, gap: 0.3 });
+
+  txt(s, "same query · same data · same code — only the data's location differs",
+    { x: 0.6, y: 3.5, w: 12.1, h: 0.4, fontSize: 14.5, color: C.ink, align: "center", italic: true });
+
+  box(s, 0.6, 4.2, 5.85, 1.3, { label: "warm", sub: "data already local — the peer answers\nfrom memory, storage is not consulted", fill: C.okBg, border: C.ok, size: 15, subSize: 12, subH: 0.7 });
+  box(s, 6.85, 4.2, 5.85, 1.3, { label: "cold", sub: "everything is fetched first —\nthe query time IS the fetch time", fill: C.badBg, border: C.bad, size: 15, subSize: 12, subH: 0.7 });
+
+  takeaway(s, "Most read-performance work in Datomic is really cache work — Part IV.", 5.85);
+  cases(s, [
+    "Slow read? First question: warm or cold — not 'is the query bad'",
+    "The 100× is illustrative; the shape is what matters",
+  ]);
+}
+
+// Catches of reads
+{
+  const s = slide("PART I · READS", "The catches of reads",
+    "Three catches, in the order people hit them.\n\nOne: a restarted peer forgets everything it had pulled close. Its first requests re-fetch its whole world, so a fresh process is a slow process. This is why deploys hurt — Part IV picks it up.\n\nTwo: peers learn about writes independently. If you write through one peer and read through another — a load balancer will happily do this to you — the reading peer may not have seen the write yet. The fix is a contract: pass the t of the write along with the request, and d/sync waits until the peer has caught up to it. Not a bug: a multi-peer fact of life.\n\nThree: one query runs on one core. There is no parallel query engine and no setting that changes it. A slow query is fixed by its shape or by warmer data — never by more CPUs. Part III shows what CAN be parallelized.");
+
+  const catches = [
+    ["1 · a restarted peer forgets everything", "first requests re-fetch its whole world — a fresh process is a slow process  (→ Part IV: deploys)", C.warnBg, C.warn],
+    ["2 · a new peer may not see your newest write", "write through peer A, read through peer B: pass the t along and wait for it", C.coolBg, C.cool],
+    ["3 · one query runs on one core", "no setting changes this — fix the query's shape or warm the data, not the CPU count  (→ Part III)", C.badBg, C.bad],
+  ];
+  catches.forEach((c, i) => {
+    const y = 1.5 + i * 1.22;
+    bar(s, 0.6, y, 12.1, 1.05, c[2], { round: true });
+    bar(s, 0.6, y, 0.09, 1.05, c[3]);
+    txt(s, c[0], { x: 0.95, y: y + 0.12, w: 11.4, h: 0.4, fontSize: 15.5, color: C.ink, bold: true });
+    txt(s, c[1], { x: 0.95, y: y + 0.56, w: 11.4, h: 0.4, fontSize: 12.5, color: C.body, fit: "shrink" });
+  });
+
+  codeBlock(s, "@(d/sync conn t)    ;; a db guaranteed to include the write at t", 0.6, 5.35, 12.1, 0.62);
+  takeaway(s, "Cold, stale, single-threaded — the three ways a correct read still surprises you.", 6.2);
+  cases(s, [
+    "Save on one pod, refresh lands on another: pass the t",
+    "Post-deploy slowness is catch 1 at fleet scale — Part IV",
+  ]);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PART II · WRITES
+// ═══════════════════════════════════════════════════════════════════
+
+sectionSlide("II", "Writes", "Everything goes through one door",
+  "The basics: one transactor applies every transaction, in order — that is what buys ACID with no locks. The easy example: batching, which is most of write throughput. Then the two catches: the writer can pause (failover), and the writer can push back (back-pressure).",
+  "Every write in the system goes through one process, in order. That single door is what gives Datomic transactions with no locks and no conflicts to resolve — and it means write capacity is fixed. The skill is using the one door well, and knowing the two ways it can make you wait.");
+
+// How a write works
+{
+  const s = slide("PART II · WRITES", "How a write works",
+    "Every peer submits its transactions to the same single transactor, which applies them one at a time, in order, and writes them durably to storage.\n\nWhy one door: because there is exactly one writer applying transactions in one order, there are no locks, no deadlocks, and no write conflicts to resolve — ever. The serialization is not a limitation that Datomic tolerates; it is the mechanism that makes transactions simple.\n\nThe flip side is on the right: write capacity is fixed. There is no second write machine to add — Part III returns to this. What you can do is use the one door well, which is the next slide.");
+
+  [0, 1, 2].forEach(i => {
+    box(s, 0.9, 1.6 + i * 1.0, 1.9, 0.72, { label: "peer", fill: C.panel, border: C.rule, size: 13 });
+    arrow(s, 2.8, 1.96 + i * 1.0, 4.6, 2.9, { color: C.warn });
+  });
+  box(s, 4.6, 2.5, 3.2, 0.9, { label: "ONE transactor", sub: "in order, one at a time", fill: C.warnBg, border: C.warn, size: 14, subSize: 10.5, subColor: C.warn });
+  arrow(s, 7.8, 2.95, 9.0, 2.95, { color: C.warn });
+  box(s, 9.0, 2.5, 3.4, 0.9, { label: "storage", sub: "durable, immediately", fill: C.dark, labelColor: C.white, size: 14, subSize: 10.5, subColor: C.rule });
+
+  box(s, 0.6, 4.15, 5.85, 1.5, { label: "what the one door BUYS", sub: "ACID transactions with no locks,\nno deadlocks, no conflicts to resolve", fill: C.okBg, border: C.ok, size: 14, subSize: 12.5, subH: 0.75 });
+  box(s, 6.85, 4.15, 5.85, 1.5, { label: "what the one door COSTS", sub: "write capacity is fixed —\nthere is no second machine to add", fill: C.badBg, border: C.bad, size: 14, subSize: 12.5, subH: 0.75 });
+
+  takeaway(s, "Serialized writes are not a limitation Datomic tolerates — they are what makes transactions simple.", 6.0);
+  cases(s, [
+    "No lock ever taken, no deadlock ever possible",
+    "Write capacity: fixed. Use the door well — next slide",
+  ]);
+}
+
+// Batching
+{
+  const s = slide("PART II · WRITES", "Using the one door well: batch",
+    "The easy example for writes, and it is most of the story.\n\nTop: a thousand rows, transacted one at a time. Every row pays a full trip through the door — a network round trip and a durable write.\n\nBottom: the same thousand rows in batches of a hundred. Ten trips instead of a thousand. Same data, same guarantees, an order of magnitude less overhead.\n\nThe second lever, in one sentence: d/transact returns a future, and code that derefs each one immediately waits out every round trip before starting the next. Keeping a few batches in flight — 'pipelining' — overlaps those waits. It matters over real networks; it is invisible on a laptop.\n\nBut batching comes first. It is 90% of the win and requires nothing but partition-all.");
+
+  txt(s, "slow — 1,000 trips through the door", { x: 0.6, y: 1.45, w: 6.0, h: 0.35, fontSize: 13.5, color: C.bad, bold: true });
+  codeBlock(s, "(doseq [r rows]\n  @(d/transact conn [r]))", 0.6, 1.85, 5.85, 1.05);
+
+  txt(s, "fast — 10 trips carrying 100 each", { x: 6.85, y: 1.45, w: 6.0, h: 0.35, fontSize: 13.5, color: C.ok, bold: true });
+  codeBlock(s, "(doseq [batch (partition-all 100 rows)]\n  @(d/transact conn batch))", 6.85, 1.85, 5.85, 1.05);
+
+  barCompare(s, 0.9, 3.4, 11.4, [
+    ["1 per tx", 100, "1,000 trips", C.bad],
+    ["100 per tx", 10, "10 trips", C.ok],
+  ], { labelW: 2.0, rowH: 0.6, gap: 0.25 });
+
+  bar(s, 0.6, 5.0, 12.1, 1.0, C.panel, { round: true });
+  txt(s, "Second lever: don't wait for each acknowledgement — keep a few batches in flight (\"pipelining\").",
+    { x: 0.9, y: 5.15, w: 11.5, h: 0.4, fontSize: 14, color: C.ink });
+  txt(s, "It hides network round trips, so it matters over real networks and does nothing on a laptop.",
+    { x: 0.9, y: 5.55, w: 11.5, h: 0.35, fontSize: 12.5, color: C.body });
+
+  takeaway(s, "Batching is 90% of write throughput, and it needs nothing but partition-all.", 6.25);
+  cases(s, [
+    "Bulk import crawling at 1 row per transaction: batch it",
+    "Pipelining helps over a network; invisible on datomic:mem",
+  ]);
+}
+
+// Catch 1: failover
+{
+  const s = slide("PART II · WRITES", "Catch 1 · the writer can pause",
+    "One process doing all the writes sounds like a single point of failure, and the fix is simple: run two transactors. One is active; the other is a standby that takes over automatically if the active one dies.\n\nThe timeline shows what a failover looks like from your application. Writes fail for a short window — seconds — until the standby has taken over. Reads never notice, because reads never involved the transactor in the first place.\n\nPeers reconnect by themselves: no URI change, no restart, no load balancer to flip.\n\nThe fine print, bottom right, is the part people get wrong: a standby is NOT a backup. Both transactors write to the same storage. Data safety comes from storage replication and backups — the standby only shortens the write pause.");
+
+  txt(s, "WRITES", { x: 0.6, y: 1.72, w: 1.4, h: 0.4, fontSize: 13, color: C.ink, bold: true, charSpacing: 1 });
+  const tx = 2.2, tw = 10.2;
+  for (let i = 0; i < 16; i++) {
+    const failing = i >= 6 && i <= 9;
+    bar(s, tx + i * (tw / 16), 1.68, tw / 16 - 0.07, 0.5, failing ? C.bad : C.ok, { round: true });
+  }
+  txt(s, "a short pause (seconds) while the standby takes over", { x: tx, y: 2.25, w: tw, h: 0.32, fontSize: 12, color: C.bad });
+
+  txt(s, "READS", { x: 0.6, y: 2.82, w: 1.4, h: 0.4, fontSize: 13, color: C.ink, bold: true, charSpacing: 1 });
+  for (let i = 0; i < 16; i++) {
+    bar(s, tx + i * (tw / 16), 2.78, tw / 16 - 0.07, 0.5, C.cool, { round: true });
+  }
+  txt(s, "never interrupted — reads don't involve the transactor", { x: tx, y: 3.35, w: tw, h: 0.32, fontSize: 12, color: C.cool });
+
+  box(s, 0.6, 4.05, 5.85, 1.5, { label: "automatic", sub: "peers reconnect by themselves —\nno URI change, no restart, no manual step", fill: C.okBg, border: C.ok, size: 14.5, subSize: 12, subH: 0.75 });
+  box(s, 6.85, 4.05, 5.85, 1.5, { label: "a standby is NOT a backup", sub: "both write the same storage —\ndata safety comes from storage replication", fill: C.badBg, border: C.bad, size: 14.5, subSize: 12, subH: 0.75 });
+
+  takeaway(s, "HA turns a dead writer into a short write pause. Reads never even notice.", 5.95);
+  cases(s, [
+    "infra/HA.md: the two-transactor setup, to run this yourself",
+    "Standby + unreplicated storage = short pauses, zero data safety",
+  ]);
+}
+
+// Catch 2: back-pressure
+{
+  const s = slide("PART II · WRITES", "Catch 2 · the writer can push back",
+    "The transactor has a background job: indexing. Recent writes accumulate in its memory and are periodically reorganized into storage. Durability is never deferred — every write hits the log immediately — but the reorganizing takes time.\n\nIf writes arrive faster than indexing can drain them, the buffer fills, and the transactor deliberately slows all writers down. That is back-pressure: latency instead of an out-of-memory crash.\n\nThe gauge shows the three states. Normal and draining are both healthy. Throttled is the one that appears on a dashboard as a mystery: write latency rising, and not a single error anywhere.\n\nWhen you see it, the question is not 'how do I turn throttling off' — it is 'why is indexing slower than my write rate'. The usual answer is that storage writes are slow.");
+
+  const states = [
+    ["NORMAL", 0.35, "buffer low · nothing special happening", C.ok, C.okBg, "writes fast"],
+    ["DRAINING", 0.7, "indexing runs in the background · writes at full speed", C.warn, C.warnBg, "writes fast"],
+    ["THROTTLED", 1.0, "buffer full · the transactor slows every writer on purpose", C.bad, C.badBg, "latency rises"],
+  ];
+  states.forEach((st, i) => {
+    const y = 1.65 + i * 1.28;
+    txt(s, st[0], { x: 0.6, y, w: 2.0, h: 0.65, fontSize: 13.5, color: st[3], bold: true, charSpacing: 1, valign: "middle" });
+    const gx = 2.8, gw = 7.4;
+    bar(s, gx, y, gw, 0.65, C.panel);
+    bar(s, gx, y, gw * st[1], 0.65, st[4]);
+    bar(s, gx + gw - 0.04, y - 0.1, 0.04, 0.85, C.bad);
+    if (i === 0) txt(s, "full", { x: gx + gw - 0.9, y: y - 0.42, w: 1.8, h: 0.3, fontSize: 10.5, color: C.bad, align: "center" });
+    txt(s, st[2], { x: 2.8, y: y + 0.68, w: 7.4, h: 0.34, fontSize: 11.5, color: C.body, fit: "shrink" });
+    bar(s, 10.5, y, 2.2, 0.65, st[4], { round: true });
+    txt(s, st[5], { x: 10.5, y, w: 2.2, h: 0.65, fontSize: 12, color: st[3], align: "center", valign: "middle", bold: true });
+  });
+
+  bar(s, 0.6, 5.65, 12.1, 0.7, C.panel, { round: true });
+  txt(s, "The symptom: write latency rising with NO errors anywhere. Not a failure — the system protecting itself.",
+    { x: 0.9, y: 5.65, w: 11.5, h: 0.7, fontSize: 13.5, color: C.ink, valign: "middle", fit: "shrink" });
+
+  takeaway(s, "Ask why indexing is slow — usually storage — before touching any knob.", 6.45);
+  cases(s, [
+    "p99 writes up, error rate flat: back-pressure, look at storage",
+    "Durability never waits — only indexing lags",
+  ]);
 }
 
 // Break
@@ -829,510 +683,315 @@ sectionSlide("III", "The cost of a read", "Four tiers · the segment · and the 
   page += 1;
   txt(s, "☕", { x: 0.9, y: 2.2, w: 2, h: 1.0, fontSize: 54, color: C.goldHi });
   txt(s, "Break — 10 minutes", { x: 0.9, y: 3.3, w: 11.5, h: 0.9, fontFace: F.serif, fontSize: 36, color: C.white });
-  txt(s, "Next: which half of the system scales, and which one does not.",
+  txt(s, "Next: what actually gets faster with more cores — and what never will.",
     { x: 0.9, y: 4.3, w: 11.5, h: 0.5, fontSize: 17, color: C.rule });
   txt(s, String(page), { x: 12.2, y: 7.0, w: 0.7, h: 0.28, fontSize: 11, color: C.meta, align: "right" });
-  s.addNotes("Halfway marker. Parts I–III were the model: what fails, who takes over, what a read costs. Parts IV–VI are what you do with it: scale it, tune it, ship it.");
+  s.addNotes("Halfway. So far: the map, reads (warm vs cold), writes (one door, batching, the two waits). After the break: parallelism and caches.");
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// PART IV · PARALLELISM
+// PART III · PARALLELISM
 // ═══════════════════════════════════════════════════════════════════
 
-sectionSlide("IV", "Parallelism", "One writer, many readers — two different mechanisms, one word",
-  "Both halves of the system are described as parallel, and the word means something different on each side. On the write side it means pipelining: keeping one serial writer busy. On the read side it means actual concurrency: many cores over one immutable value.\n\nKeeping the two apart matters because they have different limits and different levers. Pipelining adds no concurrency at all — it removes idleness from a serial resource, and it is bounded by the round trip it hides. Read parallelism is ordinary concurrency, and it is bounded by cores and by cache misses. Conflating them leads to looking for threads where there are none.");
+sectionSlide("III", "Parallelism", "Reads scale out — writes never do",
+  "The basics: 'parallel' means opposite things on the two sides of the system. Two easy examples on the read side — splitting a big read, and trying a transaction without committing it. Then the catches, all three of which are versions of 'you looked for parallelism on the wrong side'.",
+  "Reads parallelize freely: every peer, every core, over an immutable value that nothing can change mid-read. Writes never parallelize: one door, by design. Most parallelism mistakes are just looking for it on the wrong side.");
 
-// One writer many readers
+// One word two sides
 {
-  const s = slide("PART IV · PARALLELISM", "One word, two mechanisms",
-    "Writes cannot be parallelised. One transactor, one serial order — that is what makes the transaction guarantees cheap. What writes can be is pipelined: send the next transaction before the previous one's result has come back, so the transactor never sits idle waiting on a round trip.\n\nReads are parallel in the ordinary sense. Every peer, every core, over an immutable database value. Once the segments are warm those reads cost storage nothing.\n\nThe levers therefore differ. On the left you are fighting idleness. On the right you are cutting work along the index. The two are separate mechanisms; only the read side involves concurrency.\n\nWhy writes cannot be parallelised is a statement about semantics, not implementation: transaction functions and the uniqueness and cardinality checks all evaluate against the current value of the database, so every transaction has to know its exact predecessor. Two writers would have to agree on that order, which is the coordination the single writer exists to avoid.\n\nFailure signature: a write-throughput problem attacked by adding transactors. There is only ever one writer. The second process is idle by design and will stay idle.");
+  const s = slide("PART III · PARALLELISM", "One word, two sides",
+    "The write side: one process, serial, by design — Part II. It cannot be parallelized; it can only be kept busy, with batching and by keeping a few transactions in flight.\n\nThe read side: every peer, every core, in parallel, by default. No locks and no coordination — and the reason is worth saying precisely: a Datomic db is an immutable VALUE. Nothing can change under a reader, so there is nothing to lock, no snapshot to manage, and no way for two readers to interfere.\n\nSo when the word 'parallelism' comes up, first ask which side you are on. On the write side the lever is keeping the one door busy. On the read side the lever is splitting the work up — which is the next slide.");
 
-  panel(s, 0.6, 1.45, 5.85, 4.4, "WRITES", { strip: C.warnBg, titleColor: C.warn });
-  box(s, 0.9, 2.05, 5.25, 0.75, { label: "one transactor", fill: C.warnBg, border: C.warn, size: 15 });
-  defList(s, 0.95, 3.0, 5.15, [
-    ["cannot be parallelised", "serial order is the guarantee"],
-    ["can be pipelined", "overlap the round trips"],
-  ], { mono: false, rowH: 0.62, leftW: 2.5, size: 12, zebra: false });
-  bar(s, 0.9, 4.35, 5.25, 1.2, C.warnBg, { round: true });
-  txt(s, "LEVER", { x: 1.1, y: 4.5, w: 4.9, h: 0.3, fontSize: 11, color: C.warn, bold: true, charSpacing: 1.5 });
-  txt(s, "keep the writer from going idle", { x: 1.1, y: 4.82, w: 4.9, h: 0.6, fontSize: 15, color: C.ink, fit: "shrink" });
+  panel(s, 0.6, 1.5, 5.85, 3.7, "WRITES", { strip: C.warnBg, titleColor: C.warn });
+  box(s, 0.9, 2.15, 5.25, 0.8, { label: "one process, serial", fill: C.warnBg, border: C.warn, size: 15 });
+  bullets(s, ["cannot be parallelized — by design", "lever: batch, and keep it busy"], { x: 1.0, y: 3.2, w: 5.1, h: 1.0, size: 13 });
+  txt(s, "(Part II)", { x: 0.9, y: 4.55, w: 5.25, h: 0.35, fontSize: 12, color: C.meta, align: "center", italic: true });
 
-  panel(s, 6.85, 1.45, 5.85, 4.4, "READS", { strip: C.coolBg, titleColor: C.cool });
+  panel(s, 6.85, 1.5, 5.85, 3.7, "READS", { strip: C.coolBg, titleColor: C.cool });
   [0, 1, 2, 3].forEach(i =>
-    box(s, 7.15 + i * 1.35, 2.05, 1.2, 0.75, { label: "core", fill: C.coolBg, border: C.cool, size: 11 }));
-  defList(s, 7.2, 3.0, 5.15, [
-    ["every peer, every core", "no locks, no coordination"],
-    ["free once warm", "cached segments cost storage nothing"],
-  ], { mono: false, rowH: 0.62, leftW: 2.5, size: 12, zebra: false });
-  bar(s, 7.15, 4.35, 5.25, 1.2, C.coolBg, { round: true });
-  txt(s, "LEVER", { x: 7.35, y: 4.5, w: 4.9, h: 0.3, fontSize: 11, color: C.cool, bold: true, charSpacing: 1.5 });
-  txt(s, "cut the work up along the index", { x: 7.35, y: 4.82, w: 4.9, h: 0.6, fontSize: 15, color: C.ink, fit: "shrink" });
+    box(s, 7.15 + i * 1.35, 2.15, 1.2, 0.8, { label: "core", fill: C.coolBg, border: C.cool, size: 11 }));
+  bullets(s, ["parallel by default — no locks", "lever: split the work up"], { x: 7.25, y: 3.2, w: 5.1, h: 1.0, size: 13 });
+  txt(s, "(next two slides)", { x: 7.15, y: 4.55, w: 5.25, h: 0.35, fontSize: 12, color: C.meta, align: "center", italic: true });
 
-  takeaway(s, "Same word, different machinery. Do not go looking for threads inside a single query.", 6.05);
+  bar(s, 0.6, 5.45, 12.1, 0.95, C.panel, { round: true });
+  txt(s, "Why reads are safe to parallelize: a db is an immutable VALUE — nothing can change under a reader.",
+    { x: 0.9, y: 5.45, w: 11.5, h: 0.95, fontSize: 14.5, color: C.ink, valign: "middle", fit: "shrink" });
+  cases(s, [
+    "\"Can we parallelize this?\" — first ask: read side or write side?",
+    "No locks, no snapshots, no read transactions — a value can't move",
+  ]);
 }
 
-// Pipelining mechanism
+// Split a big read
 {
-  const s = slide("PART IV · PARALLELISM", "Pipelining: overlapping the round trips",
-    "Draw the mechanism before showing the measurement, because the measurement is a null result and only makes sense once the mechanism is clear.\n\nSerial: submit, wait for the round trip, get the result, submit the next. The transactor spends most of the wall clock idle, waiting on the network.\n\nPipelined: submit N transactions before collecting any of them. The transactor's work is the same; the idle gaps are gone.\n\nSo pipelining does not make the transactor faster. It stops it from waiting. That is exactly what the next slide's measurement isolates.\n\nConcretely: d/transact returns a future. Serial code derefs it immediately, so the peer waits out a network round trip and a durable write before it submits the next one. Pipelined code submits several and derefs later, so those round trips overlap.\n\nWhy depth stops paying: once enough transactions are in flight to cover the round trip, there is no idleness left to remove. Further depth only queues work, and the queue costs heap in the peer and latency per transaction with no throughput to show for it. 8 to 16 is the documented starting point; the depth that covers your round trip is a measurement, like the gap itself.\n\nFailure signature for unbounded pipelining: peer heap pressure and transaction latencies that grow with queue depth, with no throughput gain to show for it.");
+  const s = slide("PART III · PARALLELISM", "Easy example · split a big read",
+    "One hundred thousand readings to scan. Cut the range into 8 slices along the index, pmap across cores — each slice is a completely independent read over the same immutable db value.\n\nSerial: 78.7 ms. Eight slices: 24.7 ms. About 3× on this laptop.\n\nTwo rules of thumb are all you need. Slice roughly to the number of cores — hundreds of tiny slices just add hand-off overhead and slowly eat the gain. And notice there is no cleanup: no snapshot was opened, no lock taken, nothing leaks. Splitting a read is a purely local decision by the code doing the reading.\n\nNo transactor involved anywhere — this is read-side parallelism, and it scales with cores and peers.");
 
-  txt(s, "SERIAL", { x: 0.6, y: 1.53, w: 2.0, h: 0.35, fontSize: 13, color: C.ink, bold: true, charSpacing: 1 });
-  for (let i = 0; i < 4; i++) {
-    const x = 2.4 + i * 2.55;
-    box(s, x, 1.48, 0.9, 0.5, { label: "tx", fill: C.warnBg, border: C.warn, size: 11 });
-    bar(s, x + 0.95, 1.63, 1.5, 0.2, C.panel2);
-    txt(s, "idle", { x: x + 0.95, y: 1.61, w: 1.5, h: 0.25, fontSize: 9.5, color: C.meta, align: "center" });
-  }
-  txt(s, "the writer waits on the round trip between every transaction",
-    { x: 2.4, y: 2.08, w: 10.3, h: 0.35, fontSize: 12.5, color: C.meta, italic: true });
-
-  txt(s, "PIPELINED", { x: 0.6, y: 3.0, w: 2.0, h: 0.35, fontSize: 13, color: C.ink, bold: true, charSpacing: 1 });
-  for (let i = 0; i < 8; i++) {
-    box(s, 2.4 + i * 1.0, 2.95, 0.9, 0.5, { label: "tx", fill: C.okBg, border: C.ok, size: 11 });
-  }
-  txt(s, "8–16 in flight covers most of the benefit — unbounded trades latency for heap",
-    { x: 2.4, y: 3.55, w: 10.3, h: 0.35, fontSize: 12.5, color: C.ok, italic: true });
-
-  bar(s, 0.6, 4.25, 12.1, 1.35, C.panel, { round: true });
-  txt(s, "Pipelining does not make the transactor faster.", { x: 0.9, y: 4.45, w: 11.5, h: 0.45, fontFace: F.serif, fontSize: 21, color: C.ink });
-  txt(s, "It keeps it from idling between round trips. Whether that is worth anything depends entirely on how big the round trip is.",
-    { x: 0.9, y: 4.95, w: 11.5, h: 0.5, fontSize: 14, color: C.body });
-
-  takeaway(s, "The benefit is proportional to the round trip you are hiding — so it is measured per environment.", 5.85);
-}
-
-// The mem measurement
-{
-  const s = slide("PART IV · PARALLELISM", "Measured on mem: serial and pipelined are identical",
-    "Two runs on datomic:mem://: 500,000 datoms serial, 600,000 pipelined. 24.69 ms and 24.31 ms. No difference.\n\nThat is not a failed experiment, it is a controlled one. datomic:mem:// runs the transactor inside the same JVM, so there is no round trip. Remove the round trip and pipelining has nothing to overlap — which confirms that overlapping the round trip is all it ever did.\n\nRun the identical two lines against a transactor over a socket and a gap appears, proportional to that round trip. So the number is environment-specific: the gap equals the round trip being hidden, and a multiplier from a slide does not transfer.\n\nHow to read a null result: the experiment removed exactly one variable, the round trip, and the effect vanished with it. That is the strongest evidence available that the round trip was the mechanism — stronger than a positive measurement, which would not have isolated anything.\n\nThe consequence for quoting numbers: the pipelining speed-up is a property of the network between peer and transactor, not a property of Datomic. A figure from another environment describes that environment's network.");
-
-  codeBlock(s, "[(serial! 500000) (pipeline! 600000)]\n;; => [24.69 24.31]        ms — no difference", 0.6, 1.45, 6.0, 1.1);
-
-  barCompare(s, 6.9, 1.5, 5.8, [
-    ["serial!", 24.69, "24.69 ms", C.warn],
-    ["pipeline!", 24.31, "24.31 ms", C.ok],
-  ], { labelW: 1.6, rowH: 0.55 });
-  txt(s, "identical — on purpose", { x: 6.9, y: 2.7, w: 5.8, h: 0.3, fontSize: 12, color: C.meta, italic: true, align: "center" });
-
-  box(s, 0.6, 3.1, 5.85, 1.9, { label: "datomic:mem://", sub: "transactor in the SAME JVM\n→ no round trip to overlap\n→ pipelining has nothing to do", fill: C.panel, border: C.rule, size: 16, subSize: 13, subH: 0.95 });
-  box(s, 6.85, 3.1, 5.85, 1.9, { label: "transactor over a socket", sub: "a real round trip exists\n→ the gap appears\n→ proportional to that round trip", fill: C.coolBg, border: C.cool, size: 16, subSize: 13, subH: 0.95 });
-
-  takeaway(s, "Pipelining hides round trips. On mem there was no round trip to hide, so there is no gap.", 5.2);
-  note(s, "Unbounded pipelining trades latency for heap. In production, 8–16 transactions in flight covers most of the benefit.", 5.95);
-}
-
-// Slicing the index
-{
-  const s = slide("PART IV · PARALLELISM", "Parallel reads: slicing one index range across cores",
-    ":reading/t is indexed, so AVET can be sliced by value range. Each slice is an independent read — no locks, no coordination, and the transactor is not involved at all.\n\n100,000 readings, 8 slices, pmap across 10 cores: 78.70 ms serial becomes 24.68 ms. About 3.2x, median of five runs.\n\nTwo constraints matter more than the multiplier.\n\nFirst, db is a value. Every slice reads the same immutable database, so there is no snapshot to hold open, no read transaction to leak, and no possibility of slices disagreeing. This is the thing that is genuinely hard in a mutable database and free here.\n\nSecond, the speed-up is bounded by cache misses rather than by cores. On a warm peer you are dividing CPU work. On a cold peer you are overlapping storage waits — which is still a win, just a different one.\n\nWhy no coordination is needed: db is a value, and a value cannot change while it is being read. There is no snapshot to open, no read lock to take, no MVCC version to keep alive, and no way for two slices to disagree. In a mutable database this is the hard part of parallel reads; here it costs nothing.\n\nFailure signature: pmap over slices that do almost no work is slower than serial. The coordination cost per slice is fixed, so when a slice's work is smaller than that cost, parallelism loses. Counting datoms in 250-datom slices is the reproducible example — the same code that gives 3.2x on real per-slice work.");
-
-  txt(s, "d/index-range over 100,000 readings, cut into 8 slices", { x: 0.6, y: 1.4, w: 12.1, h: 0.3, fontSize: 13, color: C.meta });
+  txt(s, "100,000 readings, cut into 8 slices along the index", { x: 0.6, y: 1.45, w: 12.1, h: 0.3, fontSize: 13, color: C.meta });
   for (let i = 0; i < 8; i++) {
     const x = 0.6 + i * 1.52;
-    bar(s, x, 1.75, 1.4, 0.62, C.coolBg, { round: true });
-    txt(s, "slice " + (i + 1), { x, y: 1.75, w: 1.4, h: 0.62, fontSize: 11.5, color: C.cool, align: "center", valign: "middle" });
-    arrow(s, x + 0.7, 2.37, x + 0.7, 2.75, { color: C.cool, width: 1.1 });
-    bar(s, x, 2.75, 1.4, 0.32, C.cool, { round: true });
-    txt(s, "core", { x, y: 2.75, w: 1.4, h: 0.32, fontSize: 10, color: C.white, align: "center", valign: "middle" });
+    bar(s, x, 1.85, 1.4, 0.58, C.coolBg, { round: true });
+    txt(s, "slice " + (i + 1), { x, y: 1.85, w: 1.4, h: 0.58, fontSize: 11.5, color: C.cool, align: "center", valign: "middle" });
+    arrow(s, x + 0.7, 2.43, x + 0.7, 2.8, { color: C.cool, width: 1.1 });
+    bar(s, x, 2.8, 1.4, 0.32, C.cool, { round: true });
+    txt(s, "core", { x, y: 2.8, w: 1.4, h: 0.32, fontSize: 10, color: C.white, align: "center", valign: "middle" });
   }
-  txt(s, "one immutable db value  ·  pmap across 10 cores", { x: 0.6, y: 3.15, w: 12.1, h: 0.3, fontSize: 12.5, color: C.cool, align: "center", italic: true });
+  txt(s, "one immutable db value · pmap across cores", { x: 0.6, y: 3.2, w: 12.1, h: 0.3, fontSize: 12.5, color: C.cool, align: "center", italic: true });
 
-  barCompare(s, 0.6, 3.6, 7.6, [
-    ["serial", 78.70, "78.70 ms", C.panel2],
-    ["pmap ×8", 24.68, "24.68 ms", C.cool],
+  barCompare(s, 0.6, 3.75, 7.6, [
+    ["serial", 78.7, "78.7 ms", C.panel2],
+    ["8 slices", 24.7, "24.7 ms", C.cool],
   ], { labelW: 1.6, rowH: 0.6 });
-  bar(s, 8.5, 3.6, 4.2, 1.28, C.coolBg, { round: true });
-  txt(s, "≈ 3.2×", { x: 8.5, y: 3.75, w: 4.2, h: 0.65, fontFace: F.serif, fontSize: 30, color: C.cool, align: "center" });
-  txt(s, "median of five runs", { x: 8.5, y: 4.45, w: 4.2, h: 0.3, fontSize: 11.5, color: C.meta, align: "center" });
+  bar(s, 8.5, 3.75, 4.2, 1.28, C.coolBg, { round: true });
+  txt(s, "≈ 3×", { x: 8.5, y: 3.9, w: 4.2, h: 0.65, fontFace: F.serif, fontSize: 30, color: C.cool, align: "center" });
+  txt(s, "on this laptop", { x: 8.5, y: 4.6, w: 4.2, h: 0.3, fontSize: 11.5, color: C.meta, align: "center" });
 
-  box(s, 0.6, 5.1, 5.85, 1.25, { label: "db is a VALUE", sub: "every slice reads the same immutable database —\nno snapshot to hold open, no transaction to leak", fill: C.panel, border: C.rule, size: 14, subSize: 11.5 });
-  box(s, 6.85, 5.1, 5.85, 1.25, { label: "bounded by cache misses, not cores", sub: "warm: you divide CPU work\ncold: you overlap storage waits", fill: C.panel, border: C.rule, size: 14, subSize: 11.5 });
+  box(s, 0.6, 5.3, 5.85, 1.1, { label: "slice ≈ number of cores", sub: "hundreds of tiny slices just add overhead", fill: C.panel, border: C.rule, size: 13.5, subSize: 11.5 });
+  box(s, 6.85, 5.3, 5.85, 1.1, { label: "nothing to clean up", sub: "no snapshot, no lock, no transactor involved", fill: C.panel, border: C.rule, size: 13.5, subSize: 11.5 });
 
-  note(s, "No locks, no coordination, no transactor — slicing a read is a purely peer-local decision.", 6.55);
+  cases(s, [
+    "78.7 → 24.7 ms with 8 slices and pmap",
+    "Every slice reads the same db value — nothing to coordinate",
+  ]);
 }
 
-// Slice degradation
+// d/with
 {
-  const s = slide("PART IV · PARALLELISM", "There is a floor: re-cutting the same 100,000 readings",
-    "Same data, same cores, only the slice count changes. 8 slices: 24.68 ms. 100: 27.62. 1,000: 30.12. 10,000: 54.41.\n\nTwo things to notice.\n\nThe degradation is gradual. Going from 8 to 1,000 slices — a 125-fold increase in coordination — costs about 22%. The curve is flat enough that an optimal slice count is not required.\n\nOnly at 10,000 slices does the parallel version start approaching the 78.70 ms serial baseline, and even there it is still faster. Over-slicing degrades the result gradually rather than reversing it.\n\nIn practice: slice to roughly the core count, or a small multiple of it.\n\nWhy the curve is gradual rather than a cliff: the cost per slice is small and constant — a thread hand-off and a range set-up — so total overhead grows linearly with slice count while the useful work stays fixed. There is no threshold and no change of mode, which is why nothing dramatic happens anywhere on the curve.\n\nThe practical reading is that slice count is not worth tuning. Any value near the core count sits in the flat part.");
+  const s = slide("PART III · PARALLELISM", "Easy example · try before you commit",
+    "d/with applies a transaction to a db VALUE and hands back a new value: 'what would the db look like if…'. No transactor, nothing durable, nothing shared.\n\nBecause each what-if is just a value computed locally, you can run many at once with pmap — three scenarios in the diagram, each seeing its own future, while the real db is untouched.\n\nThe two production uses worth remembering: validating a big import BEFORE spending transactor time on it — a uniqueness violation surfaces in the dry run, not halfway through the real load — and comparing what-if scenarios in parallel.\n\nThis is the write-shaped operation that lives on the read side: all the transaction machinery, none of the door.");
 
-  const rows = [
-    ["8 slices",      24.68, "24.68 ms", C.cool],
-    ["100 slices",    27.62, "27.62 ms", C.cool],
-    ["1000 slices",   30.12, "30.12 ms", C.warn],
-    ["10000 slices",  54.41, "54.41 ms", C.bad],
-  ];
-  barCompare(s, 0.6, 1.6, 11.0, rows, { max: 78.70, labelW: 2.2, rowH: 0.62, gap: 0.22 });
-
-  // serial baseline marker
-  const trackX = 0.6 + 2.2 + 0.2, trackW = 11.0 - 2.2 - 1.5 - 0.3;
-  const bx = trackX + trackW * (78.70 / 78.70);
-  bar(s, bx - 0.02, 1.5, 0.04, 3.5, C.bad);
-  txt(s, "serial baseline  78.70 ms", { x: bx - 3.3, y: 5.05, w: 3.4, h: 0.35, fontSize: 12, color: C.bad, align: "right", bold: true });
-
-  bar(s, 0.6, 5.5, 5.85, 0.95, C.okBg, { round: true });
-  txt(s, "8 → 1000 slices costs ~22%", { x: 0.85, y: 5.62, w: 5.4, h: 0.35, fontSize: 14, color: C.ink, bold: true });
-  txt(s, "a forgiving curve — no optimum to hunt for", { x: 0.85, y: 5.98, w: 5.4, h: 0.35, fontSize: 12.5, color: C.body });
-
-  bar(s, 6.85, 5.5, 5.85, 0.95, C.warnBg, { round: true });
-  txt(s, "even 10,000 slices beats serial", { x: 7.1, y: 5.62, w: 5.4, h: 0.35, fontSize: 14, color: C.ink, bold: true });
-  txt(s, "over-slicing degrades gradually", { x: 7.1, y: 5.98, w: 5.4, h: 0.35, fontSize: 12.5, color: C.body });
-
-  note(s, "Slice to about the core count, or a small multiple of it.", 6.6);
-}
-
-// d/with what-ifs
-{
-  const s = slide("PART IV · PARALLELISM", "Parallel what-ifs: d/with branches a value",
-    "d/with applies a transaction to a database value and hands back a new value. No transactor is involved, nothing is durable, and nothing is shared — so any number of them can run at once.\n\nThe second form is the important one: after three concurrent what-ifs each reporting 105,005 readings, the base db still reports 105,000. Immutability is what makes the concurrency safe without locking.\n\nUses in production: validation before submitting, scenario analysis, and import dry runs — checking that a large load would not violate an invariant before spending transactor time on it.\n\nMechanism: d/with runs the same transaction machinery the transactor runs, but inside the peer and against a value. It returns db-before, db-after, tx-data and tempids — everything the transactor would have reported, minus durability.\n\nFailure signature it prevents: discovering a uniqueness violation or a failing transaction function at commit time, on the transactor, halfway through a bulk import.");
-
-  box(s, 0.6, 1.5, 2.6, 1.0, { label: "db", sub: "the base value", fill: C.dark, labelColor: C.white, size: 18, subSize: 11, subColor: C.rule });
+  box(s, 0.6, 1.6, 2.6, 1.0, { label: "db", sub: "the real value", fill: C.dark, labelColor: C.white, size: 18, subSize: 11, subColor: C.rule });
   ["scenario A", "scenario B", "scenario C"].forEach((sc, i) => {
-    const y = 1.45 + i * 1.05;
-    arrow(s, 3.2, 2.0, 4.6, y + 0.35, { color: C.gold });
-    box(s, 4.6, y, 3.4, 0.7, { label: "d/with " + sc, fill: C.panel, border: C.rule, size: 12.5, mono: false });
-    box(s, 8.4, y, 4.3, 0.7, { label: "→ [[105005]]", fill: C.coolBg, border: C.cool, size: 12.5, mono: true });
+    const y = 1.55 + i * 1.05;
+    arrow(s, 3.2, 2.1, 4.6, y + 0.35, { color: C.gold });
+    box(s, 4.6, y, 3.6, 0.7, { label: "d/with " + sc, fill: C.panel, border: C.rule, size: 12.5 });
+    box(s, 8.6, y, 4.1, 0.7, { label: "a what-if value", fill: C.coolBg, border: C.cool, size: 12.5 });
   });
-  txt(s, "no transactor · nothing durable · nothing shared", { x: 4.6, y: 4.55, w: 8.1, h: 0.3, fontSize: 12.5, color: C.cool, italic: true, align: "center" });
+  txt(s, "no transactor · nothing durable · the real db is untouched", { x: 4.6, y: 4.7, w: 8.1, h: 0.3, fontSize: 12.5, color: C.cool, italic: true, align: "center" });
 
   codeBlock(s,
-    "(doall (pmap #(d/q all-readings (:db-after (d/with db %))) scenarios))\n;; => ([[105005]] [[105005]] [[105005]])\n\n(d/q all-readings db)\n;; => [[105000]]          the base db is unchanged",
-    0.6, 5.0, 8.0, 1.65);
-  bar(s, 8.9, 5.0, 3.8, 1.65, C.panel, { round: true });
-  txt(s, "USE FOR", { x: 9.15, y: 5.15, w: 3.3, h: 0.3, fontSize: 11, color: C.gold, bold: true, charSpacing: 1.5 });
-  bullets(s, ["validation", "scenario analysis", "import dry runs"], { x: 9.15, y: 5.5, w: 3.3, h: 1.05, size: 12.5, gap: 4 });
+    "(d/with db proposed-tx)                    ;; => a new value; real db unchanged\n(pmap #(check (d/with db %)) scenarios)    ;; many at once, safely",
+    0.6, 5.15, 8.0, 1.0);
+  bar(s, 8.9, 5.15, 3.8, 1.0, C.panel, { round: true });
+  txt(s, "USE FOR", { x: 9.15, y: 5.25, w: 3.3, h: 0.28, fontSize: 11, color: C.gold, bold: true, charSpacing: 1.5 });
+  txt(s, "import dry runs · what-if scenarios", { x: 9.15, y: 5.55, w: 3.3, h: 0.55, fontSize: 12, color: C.body });
+
+  takeaway(s, "All the transaction machinery, none of the door: validate cheaply, commit once.", 6.35);
+  cases(s, [
+    "Dry-run a bulk import before spending transactor time on it",
+    "A uniqueness violation surfaces in the what-if, not mid-load",
+  ]);
 }
 
-// Where it does not apply
+// Catches of parallelism
 {
-  const s = slide("PART IV · PARALLELISM", "Where parallelism does not apply",
-    "A single d/q is single-threaded inside the peer. There is no query planner hint, no degree-of-parallelism setting, and no thread pool to grow.\n\nSo parallelism applies across queries, or across index slices that the caller cut — never within one query. If a single query is slow, the answer is its shape or its cache, not more cores.\n\nParallel SQL engines behave differently here, which is why the expectation is stated explicitly.\n\nWhy no knob exists: a datalog query is a join over sorted index traversals, executed in one thread against local structures. Parallelising within a query would mean partitioning the join, which the engine does not do.\n\nFailure signature: one slow query and a peer with idle cores. The cores will not be used. The levers that remain are the query shape — clause order, indexed attributes, narrower ranges — and cache residency.");
+  const s = slide("PART III · PARALLELISM", "The catches of parallelism",
+    "All three catches are versions of one mistake: looking for parallelism on the wrong side.\n\nOne: a single d/q runs on one core, and no setting changes that. Parallelism is always across queries, or across slices you cut yourself. One slow query next to eight idle cores stays slow.\n\nTwo: a second transactor adds zero write throughput. It is a standby for failover — Part II — not a second worker. It is idle by design and will stay idle.\n\nThree: on a cold peer, a parallel-read speedup is mostly overlapping storage fetches, not dividing CPU work. That is still useful — but if the numbers look too good, check whether the real fix is a warm cache rather than more threads.");
 
-  box(s, 0.6, 1.6, 12.1, 1.15, { label: "a single (d/q …) is SINGLE-THREADED inside the peer", fill: C.badBg, border: C.bad, size: 20, labelColor: C.ink });
-
-  txt(s, "So parallelism applies …", { x: 0.6, y: 3.05, w: 12.1, h: 0.35, fontSize: 14, color: C.ink, bold: true });
-  box(s, 0.6, 3.5, 3.87, 1.3, { label: "✓  ACROSS queries", sub: "many requests, many cores", fill: C.okBg, border: C.ok, size: 14, subSize: 12 });
-  box(s, 4.72, 3.5, 3.87, 1.3, { label: "✓  ACROSS slices", sub: "cut by the caller, as on the last slide", fill: C.okBg, border: C.ok, size: 14, subSize: 12 });
-  box(s, 8.84, 3.5, 3.87, 1.3, { label: "✕  WITHIN one query", sub: "no knob exists, and none is coming", fill: C.badBg, border: C.bad, size: 14, subSize: 12 });
-
-  takeaway(s, "A slow single query is fixed by its shape or its cache — never by more cores.", 5.05);
-  waypoint(s, "waypoint — labs §4", "MEM",
-    "All four experiments run in memory, including the one that shows no difference; that null result is the control.\nThe two counter-intuitive results are pipelining on mem and the 10,000-slice floor.",
-    { y: 5.75, h: 1.25 });
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// PART V · SETTINGS AND SIGNALS
-// ═══════════════════════════════════════════════════════════════════
-
-sectionSlide("V", "Settings and signals", "The memory-index loop · the knobs · what to alert on",
-  "Settings are lookups. The loop they all act on is what makes a red dashboard readable — it identifies which knob is relevant.\n\nEvery setting in this part acts on one of two loops: the memory-index loop on the write side, or the cache ladder from Part III on the read side. Placing a setting on a loop is what makes it diagnosable. Read on its own, a settings table is a list of names.");
-
-// The loop
-{
-  const s = slide("PART V · SETTINGS AND SIGNALS", "The memory-index loop",
-    "Writes land in the memory index and, always and immediately, in the durable log. Durability never waits for indexing: the rest of the loop is an indexing path, not a write path.\n\nWhen the memory index passes memory-index-threshold, an indexing job starts draining it into storage.\n\nIf writes keep outrunning that drain, the memory index reaches memory-index-max, and the transactor throttles the writers. p99 write latency rises.\n\nThe throttle is intentional back-pressure protecting the transactor's heap, not a failure. But it is what appears on your dashboard as a latency incident, so knowing the loop is what stops you from tuning at random when it happens.\n\nThreshold starts the job. Max starts the throttling. Those two sentences describe the whole loop.\n\nWhy the loop exists at all: appending to the durable log is cheap, while updating the sorted indexes is expensive — it rewrites tree segments. Doing the second on every transaction would make every write pay index-maintenance cost. So recent writes live in an in-memory index, get merged into the durable indexes in batches, and queries read the union of the two. Durability is never deferred; only indexing is.\n\nFailure signature: query latency that climbs slowly between indexing jobs and drops when one finishes. That is the memory index growing and then being merged — reads are paying for the union.");
-
-  box(s, 0.6, 1.5, 2.2, 0.7, { label: "writes", fill: C.panel2, size: 14 });
-  arrow(s, 2.8, 1.85, 4.0, 1.85, { color: C.gold });
-
-  box(s, 4.0, 1.5, 4.4, 0.7, { label: "memory index", fill: C.coolBg, border: C.cool, size: 15 });
-  arrow(s, 8.4, 1.85, 9.7, 1.85, { color: C.ok });
-  box(s, 9.7, 1.5, 3.0, 0.7, { label: "durable log", sub: "always, immediately", fill: C.okBg, border: C.ok, size: 13, subSize: 10, subColor: C.ok });
-
-  arrow(s, 6.2, 2.2, 6.2, 2.95, { color: C.gold, label: "past memory-index-threshold", labelW: 4.2, labelDx: 2.4, labelSize: 11, labelColor: C.gold });
-  box(s, 4.0, 2.95, 4.4, 0.7, { label: "indexing job", fill: C.panel, border: C.rule, size: 15 });
-  arrow(s, 8.4, 3.3, 9.7, 3.3, { color: C.rule });
-  box(s, 9.7, 2.95, 3.0, 0.7, { label: "storage", fill: C.dark, labelColor: C.white, size: 13 });
-
-  arrow(s, 6.2, 3.65, 6.2, 4.4, { color: C.warn, label: "if writes keep outrunning it", labelW: 4.2, labelDx: 2.4, labelSize: 11, labelColor: C.warn });
-  bar(s, 3.2, 4.4, 6.0, 1.5, C.badBg, { round: true });
-  txt(s, "memory-index-max reached", { x: 3.45, y: 4.55, w: 5.5, h: 0.35, fontFace: F.mono, fontSize: 13.5, color: C.bad, bold: true });
-  txt(s, "→  the transactor throttles writers\n→  p99 write latency rises", { x: 3.45, y: 4.95, w: 5.5, h: 0.8, fontSize: 13, color: C.ink });
-
-  bar(s, 0.6, 6.15, 12.1, 0.65, C.panel, { round: true });
-  txt(s, "threshold  starts the indexing job          ·          max  starts the throttling",
-    { x: 0.85, y: 6.15, w: 11.6, h: 0.65, fontSize: 14.5, color: C.ink, valign: "middle", align: "center", fit: "shrink" });
-}
-
-// Throttle is not a failure
-{
-  const s = slide("PART V · SETTINGS AND SIGNALS", "The throttle is back-pressure, not a failure",
-    "Same gauge, three states. The third is the one commonly misread as a failure.\n\nNormal: the memory index sits below threshold, no indexing job running.\n\nDraining: past threshold, an indexing job is running, writes continue at full speed. This is the healthy steady state under sustained load, not a warning.\n\nThrottled: at max. The transactor deliberately slows the writers so the memory index cannot grow past what its heap can hold. Nothing is lost, nothing errors, and p99 rises.\n\nWhen you see the third state, the question is not 'how do I turn off throttling' — it is 'why is the drain slower than the write rate'. Usually that is storage write latency, or an indexing job competing with a heavy write burst.\n\nWhy throttling rather than failing: the memory index is bounded by the transactor's heap. Without back-pressure a sustained burst would exhaust it, which is an outage. Slowing the writers converts an outage into latency, which is the trade being made deliberately.\n\nWhere to look, in order: the drain is storage writes plus index maintenance, so check storage write latency first and overlapping indexing jobs second. Raising memory-index-max buys a longer runway; it does not make the drain faster.");
-
-  const states = [
-    ["NORMAL", 0.35, "below threshold · no job running", C.ok, C.okBg],
-    ["DRAINING", 0.7, "past threshold · indexing job running · writes at full speed", C.warn, C.warnBg],
-    ["THROTTLED", 1.0, "at max · transactor slows the writers on purpose", C.bad, C.badBg],
+  const catches = [
+    ["1 · one d/q = one core", "no setting changes this — parallelism is across queries, or across slices you cut", C.badBg, C.bad],
+    ["2 · a second transactor adds ZERO write throughput", "it is a standby for failover (Part II), not a second worker — idle by design", C.warnBg, C.warn],
+    ["3 · on a cold peer, the speedup is mostly overlapped waiting", "you are overlapping fetches, not dividing CPU work — the real fix may be a warm cache", C.coolBg, C.cool],
   ];
-  states.forEach((st, i) => {
-    const y = 1.9 + i * 1.5;
-    txt(s, st[0], { x: 0.6, y, w: 2.0, h: 0.5, fontSize: 14, color: st[3], bold: true, charSpacing: 1, valign: "middle" });
-    const gx = 2.8, gw = 7.4;
-    bar(s, gx, y, gw, 0.75, C.panel);
-    bar(s, gx, y, gw * st[1], 0.75, st[4]);
-    bar(s, gx + gw * 0.55 - 0.02, y - 0.12, 0.04, 0.99, C.warn);
-    bar(s, gx + gw - 0.04, y - 0.12, 0.04, 0.99, C.bad);
-    if (i === 0) {
-      txt(s, "threshold", { x: gx + gw * 0.55 - 0.9, y: y - 0.45, w: 1.8, h: 0.3, fontSize: 10.5, color: C.warn, align: "center" });
-      txt(s, "max", { x: gx + gw - 0.9, y: y - 0.45, w: 1.8, h: 0.3, fontSize: 10.5, color: C.bad, align: "center" });
+  catches.forEach((c, i) => {
+    const y = 1.55 + i * 1.35;
+    bar(s, 0.6, y, 12.1, 1.15, c[2], { round: true });
+    bar(s, 0.6, y, 0.09, 1.15, c[3]);
+    txt(s, c[0], { x: 0.95, y: y + 0.14, w: 11.4, h: 0.42, fontSize: 15.5, color: C.ink, bold: true, fit: "shrink" });
+    txt(s, c[1], { x: 0.95, y: y + 0.6, w: 11.4, h: 0.45, fontSize: 12.5, color: C.body, fit: "shrink" });
+  });
+
+  takeaway(s, "Before parallelizing, ask which side you are on. The write side has one answer: batch.", 5.85);
+  cases(s, [
+    "One slow query, eight idle cores: the cores stay idle",
+    "Write throughput problem 'solved' with a second transactor: still 1× ",
+  ]);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PART IV · CACHES
+// ═══════════════════════════════════════════════════════════════════
+
+sectionSlide("IV", "Caches", "Where the read cost actually goes",
+  "Part I said a read costs whatever fetching costs. This section is about not fetching. The basics: a ladder of four tiers, and the block-not-row unit of caching. Then the one big catch — deploys empty the caches — and two small ones.",
+  "Part I established that a read costs whatever fetching costs. Caches are how you stop fetching. The model is a ladder of four tiers; the unit moving through it is a block of the index, not a row; and the big catch is that a deploy empties most of the ladder at the worst possible moment.");
+
+// The ladder
+{
+  const s = slide("PART IV · CACHES", "The ladder — a read walks down until a tier answers",
+    "Four tiers, fastest first.\n\nTier 1, the object cache, lives in the peer's own memory. It comes for free — every peer has one.\n\nTier 2, valcache, is a local SSD cache. Its superpower is not speed: it SURVIVES RESTARTS, which — remember catch 1 of reads — is exactly the event that empties tier 1.\n\nTier 3, memcached, is shared between peers: if one peer fetched something, its siblings find it here without touching storage.\n\nTier 4 is storage itself — the slowest, and on DynamoDB the one that costs money per read.\n\nTiers 2 and 3 are optional add-ons; you can run with tier 1 only. And the whole job of cache configuration, in one sentence: keep everyday reads answering from as high up the ladder as possible.");
+
+  const tiers = [
+    ["1", "object cache", "in the peer's memory — free, every peer has one", "~instant", C.dark, C.white],
+    ["2", "valcache", "local SSD — survives restarts!", "fast", C.gold, C.white],
+    ["3", "memcached", "shared between peers", "~1 ms", C.panel2, C.ink],
+    ["4", "storage", "the database itself", "slow, $", C.panel, C.ink],
+  ];
+  let ty = 1.5;
+  tiers.forEach((t, i) => {
+    const h = 0.92;
+    const indent = i * 0.35;
+    bar(s, 1.0 + indent, ty, 8.7 - indent, h, t[4], { round: true });
+    txt(s, t[0], { x: 1.25 + indent, y: ty, w: 0.5, h, fontFace: F.serif, fontSize: 20, color: t[5], bold: true, valign: "middle" });
+    txt(s, t[1], { x: 1.85 + indent, y: ty + 0.12, w: 3.2, h: 0.38, fontSize: 15, color: t[5], bold: true });
+    txt(s, t[2], { x: 1.85 + indent, y: ty + 0.5, w: 6.4 - indent, h: 0.34, fontSize: 11.5, color: t[5], fit: "shrink" });
+    txt(s, t[3], { x: 10.0, y: ty, w: 2.6, h, fontFace: F.mono, fontSize: 13.5, color: C.body, valign: "middle" });
+    ty += h + 0.14;
+  });
+  arrow(s, 0.75, 1.7, 0.75, 5.4, { color: C.meta, width: 1.2 });
+  txt(s, "a read walks down", { x: 0.18, y: 5.5, w: 2.2, h: 0.3, fontSize: 10.5, color: C.meta });
+
+  takeaway(s, "Your whole job: keep everyday reads answering from as high up as possible. Tiers 2–3 are optional add-ons.", 5.95);
+  cases(s, [
+    "Nothing ever needs invalidating — immutable data is correct forever",
+    "That is why four stacked caches need zero coordination",
+  ]);
+}
+
+// Segments
+{
+  const s = slide("PART IV · CACHES", "The unit is a block, not a row",
+    "What actually moves through the ladder is not an entity and not a row. It is a SEGMENT: a block of the index holding thousands of neighboring datoms.\n\nAsk for one entity, and the peer fetches the whole block it lives in — the neighbors come along free.\n\nThe consequence is the one sizing intuition worth having: data read together is cheap if it lives together in an index. Scanning a range of readings by time touches a few blocks. Fetching a thousand entities scattered all over the index can touch a thousand blocks. Same answer size — about a hundred times the fetching.\n\nSo when a workload seems mysteriously expensive despite a healthy cache, look at its access pattern: scattered reads defeat every tier of the ladder at once.");
+
+  txt(s, "you ask for ONE entity …", { x: 0.6, y: 1.5, w: 5.8, h: 0.35, fontSize: 14, color: C.ink, bold: true });
+  txt(s, "… a whole BLOCK arrives, neighbours included", { x: 6.5, y: 1.5, w: 6.0, h: 0.35, fontSize: 14, color: C.ink, bold: true });
+
+  const segs = 5, sw = 2.34;
+  for (let i = 0; i < segs; i++) {
+    const x = 0.6 + i * sw;
+    const hot = i === 2;
+    bar(s, x, 2.1, sw - 0.12, 1.15, hot ? C.goldHi : C.panel, { round: true });
+    txt(s, "block " + (i + 1), { x, y: 2.17, w: sw - 0.12, h: 0.3, fontSize: 11, color: hot ? C.dark : C.meta, align: "center" });
+    for (let k = 0; k < 5; k++) {
+      bar(s, x + 0.18 + k * 0.4, 2.6, 0.3, 0.45, hot ? C.dark : C.panel2);
     }
-    txt(s, st[2], { x: 2.8, y: y + 0.8, w: 9.9, h: 0.4, fontSize: 12.5, color: C.body });
-    bar(s, 10.5, y, 2.2, 0.75, st[4], { round: true });
-    txt(s, i === 2 ? "p99 rises" : "p99 flat", { x: 10.5, y, w: 2.2, h: 0.75, fontSize: 12.5, color: st[3], align: "center", valign: "middle", bold: true });
-  });
+  }
+  bar(s, 5.28, 3.35, 2.22, 0.1, C.gold);
+  txt(s, "one block fetched — thousands of neighbours came along free", { x: 3.3, y: 3.5, w: 8.0, h: 0.35, fontSize: 13, color: C.gold, bold: true, align: "center" });
 
-  takeaway(s, "Throttled is not broken. Ask why the drain is slower than the write rate — usually storage.", 6.3);
+  box(s, 0.6, 4.2, 5.85, 1.4, { label: "together in the index", sub: "a time-range scan touches a few blocks\n→ cheap", fill: C.okBg, border: C.ok, size: 14, subSize: 12, subH: 0.7 });
+  box(s, 6.85, 4.2, 5.85, 1.4, { label: "scattered across the index", sub: "1,000 scattered entities ≈ 1,000 blocks\n→ ~100× the fetching, same answer", fill: C.badBg, border: C.bad, size: 14, subSize: 12, subH: 0.7 });
+
+  takeaway(s, "Data read together is cheap if it lives together. Scattered reads defeat every tier at once.", 5.95);
+  cases(s, [
+    "Range scan by time: a few blocks",
+    "Random lookups all over: a block per lookup — no cache tier fixes it",
+  ]);
 }
 
-// Transactor settings
+// Catch: deploys
 {
-  const s = slide("PART V · SETTINGS AND SIGNALS", "Transactor settings — properties file",
-    "Read this table as a diagnosis aid rather than as a configuration guide: symptom on the right, knob on the left.\n\nThe first two are the loop from two slides ago. object-cache-max is the transactor's own read cache — a transactor reads while it indexes. memcached unset means every peer misses separately, which is Part III's thundering herd. heartbeat-interval-msec directly widens or narrows Part II's failover window.\n\nThe warning at the bottom: passing ANY JVM flag to bin/transactor makes it drop its own GC defaults. If you pass anything at all, re-specify the GC flags yourself.\n\nNote what the table does not contain: there is no setting that makes indexing faster. Every knob here changes when work happens or how much is buffered. Making the drain faster is a storage question, not a properties-file question.\n\nThe GC line is a real failure signature: a transactor that starts pausing after an unrelated flag was added to bin/transactor is running on default JVM GC, not because that flag was wrong but because passing any flag at all drops the shipped defaults.");
+  const s = slide("PART IV · CACHES", "Catch 1 · deploys empty the caches",
+    "This is catch 1 of reads — a restarted peer forgets everything — at fleet scale, and it is the most common Datomic performance incident in the wild.\n\nRestart all twenty peers at once and twenty empty caches ask storage the same questions at the same moment. Latency spikes, there are zero errors, and it resolves itself in a few minutes as the caches refill.\n\nBecause it looks like a mystery, it routinely gets misread as a bad release — and rolled back, which restarts every peer again and repeats the spike.\n\nThree fixes, cheapest first. Rolling deploys: replace a few peers at a time, so most of the fleet stays warm — needs nothing. Memcached: twenty cold peers cause one shared miss instead of twenty — needs a server. Valcache: the SSD tier survives the restart entirely — needs a disk.");
 
-  const hdr = ["SETTING", "IF", "EFFECT"];
-  const rows = [
-    ["memory-index-threshold", "too high", "long, bursty indexing jobs"],
-    ["memory-index-max", "too low", "early throttling under load"],
-    ["object-cache-max", "too low", "warm reads behave like cold ones"],
-    ["memcached", "unset", "each peer misses storage separately"],
-    ["heartbeat-interval-msec", "too high", "a longer Part II failover window"],
+  bar(s, 0.6, 1.5, 12.1, 1.5, C.badBg, { round: true });
+  txt(s, "restart 20 peers at once  →  20 empty caches  →  everyone fetches the same things at the same moment",
+    { x: 0.9, y: 1.65, w: 11.5, h: 0.45, fontSize: 15, color: C.ink, bold: true, fit: "shrink" });
+  txt(s, "latency spikes · zero errors · resolves itself in minutes — and often gets misread as a bad release and rolled back (which restarts everything again)",
+    { x: 0.9, y: 2.2, w: 11.5, h: 0.65, fontSize: 12.5, color: C.body });
+
+  txt(s, "Three fixes, cheapest first:", { x: 0.6, y: 3.35, w: 12.1, h: 0.35, fontSize: 14, color: C.ink, bold: true });
+  const mits = [
+    ["rolling deploys", "replace a few peers at a time — most of the fleet stays warm", "needs nothing", C.okBg, C.ok],
+    ["memcached", "20 cold peers cause 1 shared miss, not 20", "needs a server", C.coolBg, C.cool],
+    ["valcache", "the SSD tier survives the restart entirely", "needs a disk", C.warnBg, C.warn],
   ];
-  bar(s, 0.6, 1.45, 12.1, 0.5, C.dark);
-  [[0.85, 4.5], [5.5, 1.8], [7.5, 5.0]].forEach((c, i) =>
-    txt(s, hdr[i], { x: c[0], y: 1.45, w: c[1], h: 0.5, fontSize: 11.5, color: C.goldHi, bold: true, charSpacing: 1.5, valign: "middle" }));
-  rows.forEach((r, i) => {
-    const y = 2.05 + i * 0.68;
-    bar(s, 0.6, y, 12.1, 0.6, i % 2 ? C.bg : C.panel);
-    txt(s, r[0], { x: 0.85, y, w: 4.5, h: 0.6, fontFace: F.mono, fontSize: 13, color: C.ink, valign: "middle", fit: "shrink" });
-    bar(s, 5.5, y + 0.13, 1.5, 0.34, C.warnBg, { round: true });
-    txt(s, r[1], { x: 5.5, y: y + 0.13, w: 1.5, h: 0.34, fontSize: 11, color: C.warn, align: "center", valign: "middle" });
-    txt(s, r[2], { x: 7.5, y, w: 5.0, h: 0.6, fontSize: 13, color: C.body, valign: "middle", fit: "shrink" });
+  mits.forEach((m, i) => {
+    const x = 0.6 + i * 4.07;
+    bar(s, x, 3.8, 3.87, 1.8, m[3], { round: true });
+    txt(s, String(i + 1), { x: x + 0.2, y: 3.95, w: 0.4, h: 0.35, fontFace: F.serif, fontSize: 17, color: m[4], bold: true });
+    txt(s, m[0], { x: x + 0.7, y: 3.97, w: 3.0, h: 0.35, fontSize: 14.5, color: C.ink, bold: true });
+    txt(s, m[1], { x: x + 0.7, y: 4.4, w: 3.0, h: 0.75, fontSize: 12, color: C.body });
+    txt(s, "(" + m[2] + ")", { x: x + 0.7, y: 5.2, w: 3.0, h: 0.3, fontSize: 11.5, color: m[4], italic: true });
   });
 
-  bar(s, 0.6, 5.6, 12.1, 1.1, C.badBg, { round: true });
-  bar(s, 0.6, 5.6, 0.09, 1.1, C.bad);
-  txt(s, "⚠  Passing ANY JVM flag to bin/transactor makes it drop its own GC defaults.",
-    { x: 0.9, y: 5.72, w: 11.6, h: 0.35, fontSize: 14, color: C.bad, bold: true });
-  txt(s, "Re-specify  -XX:+UseG1GC  -XX:MaxGCPauseMillis=50  whenever you pass anything at all.",
-    { x: 0.9, y: 6.12, w: 11.6, h: 0.4, fontFace: F.mono, fontSize: 12.5, color: C.ink });
+  takeaway(s, "Post-deploy latency spike with zero errors: cold caches, not a bad release. Don't roll back.", 5.95);
+  cases(s, [
+    "The rollback restarts every peer and repeats the spike",
+    "Rolling deploys fix most of it and need nothing",
+  ]);
 }
 
-// Peer flags
+// Small catches
 {
-  const s = slide("PART V · SETTINGS AND SIGNALS", "Peer flags — and where each one lands on the ladder",
-    "The peer flags map one-to-one onto Part III's tier ladder, which is the easiest way to remember them: the first four are tiers 1, 3, 2 and 2's size limit. The fifth is Part II's dial.\n\nDefaults change between releases. Confirm the values against the distribution in use — the next slide is how.\n\nWhy the list is this short: a peer has almost nothing to tune. It has a cache ladder and one timeout. Everything else about how a peer behaves is a property of the code it runs — which queries it issues and what access pattern those produce.\n\nA misconfiguration worth naming: valcachePath pointed at a directory two peers share. Valcache is a per-peer cache, so a shared path buys no sharing and is not a supported way to build one. The tier that is shared on purpose is memcached.");
+  const s = slide("PART IV · CACHES", "Catches 2 & 3 · small but common",
+    "Two smaller catches to file away.\n\nMemcached dying breaks nothing. Every tier of the ladder is optional except storage, so losing the shared tier means every read that would have hit it walks further down — everything gets slower, nothing gets wrong. Treat it as a degradation to fix during business hours, not a page.\n\nAnd you cannot ask the cache anything. No peer API reports what is cached or how full any tier is — d/db-stats counts the data, not the cache. Cache behaviour is observed from the outside: time the same query twice and compare, or watch storage-read metrics and the memcached hit ratio.");
 
-  const flags = [
-    ["datomic.objectCacheMax", "the peer's own heap cache", "tier 1", C.dark, C.white],
-    ["datomic.memcachedServers", "join the shared tier", "tier 3", C.panel2, C.ink],
-    ["datomic.valcachePath", "the SSD tier", "tier 2", C.gold, C.white],
-    ["datomic.valcacheMaxGb", "how much of that disk to use", "tier 2", C.gold, C.white],
-    ["datomic.txTimeoutMsec", "how long a write waits for a writer", "Part II", C.warnBg, C.warn],
-  ];
-  flags.forEach((f, i) => {
-    const y = 1.5 + i * 0.85;
-    bar(s, 0.6, y, 12.1, 0.72, i % 2 ? C.bg : C.panel);
-    txt(s, "-D" + f[0], { x: 0.85, y, w: 5.0, h: 0.72, fontFace: F.mono, fontSize: 13.5, color: C.ink, valign: "middle", fit: "shrink" });
-    txt(s, f[1], { x: 6.1, y, w: 5.0, h: 0.72, fontSize: 13.5, color: C.body, valign: "middle", fit: "shrink" });
-    bar(s, 11.35, y + 0.16, 1.35, 0.4, f[3], { round: true });
-    txt(s, f[2], { x: 11.35, y: y + 0.16, w: 1.35, h: 0.4, fontSize: 11, color: f[4], align: "center", valign: "middle", bold: true });
-  });
+  panel(s, 0.6, 1.5, 5.85, 4.3, "2 · MEMCACHED DYING BREAKS NOTHING", { strip: C.okBg, titleColor: C.ok });
+  prose(s, "Every tier except storage is optional. Lose the shared tier and reads walk further down the ladder: everything slower, nothing wrong.",
+    { x: 0.9, y: 2.15, w: 5.3, h: 1.3, size: 13 });
+  box(s, 0.9, 3.6, 5.25, 1.0, { label: "a degradation, not a page", sub: "fix it during business hours", fill: C.okBg, border: C.ok, size: 14, subSize: 11.5 });
 
-  takeaway(s, "Four of the five flags are just the cache ladder. The fifth is the failover dial.", 5.95);
-  note(s, "Defaults change between releases — confirm against the distribution you run, not against this slide.", 6.7);
-}
+  panel(s, 6.85, 1.5, 5.85, 4.3, "3 · YOU CAN'T ASK THE CACHE", { strip: C.coolBg, titleColor: C.cool });
+  prose(s, "No API reports what is cached — d/db-stats counts the data, not the cache. Observe from outside:",
+    { x: 7.15, y: 2.15, w: 5.3, h: 1.0, size: 13 });
+  box(s, 7.15, 3.25, 5.25, 0.72, { label: "time the same query twice", fill: C.coolBg, border: C.cool, size: 13 });
+  box(s, 7.15, 4.1, 5.25, 0.72, { label: "watch storage reads & hit ratios", fill: C.coolBg, border: C.cool, size: 13 });
 
-// Read the defaults
-{
-  const s = slide("PART V · SETTINGS AND SIGNALS", "Read the defaults from the distribution, not from a deck",
-    "Three commands, and they are the actual answer to 'what is the default for X'.\n\nThe samples directory is the authoritative starting point for a properties file. The grep strips comments and blank lines so you see only what is actually set. The third one finds where a feature is wired in the scripts — useful for valcache in particular, whose flags moved between releases.\n\nWhere the distribution and this deck disagree, the distribution is current.\n\nThe reason to read defaults off the distribution rather than out of documentation is that defaults are release-specific, and the distribution on disk is the one that will run. It is a two-minute check that resolves most questions of the form why is this setting not taking effect before they turn into debugging.");
-
-  codeBlock(s,
-    "ls $DATOMIC/config/samples/\n\ngrep -vE '^\\s*(#|$)' $DATOMIC/config/samples/sql-transactor-template.properties\n\ngrep -rn \"valcache\" $DATOMIC/bin $DATOMIC/config",
-    0.6, 1.6, 12.1, 2.3, { dark: true, size: 15 });
-
-  const why = [
-    ["ls samples/", "the authoritative starting point for a properties file"],
-    ["grep -vE '#|$'", "shows only what is actually set, not the commentary"],
-    ["grep -rn valcache", "finds where a feature is wired — flags move between releases"],
-  ];
-  why.forEach((w, i) => {
-    const y = 4.2 + i * 0.7;
-    bar(s, 0.6, y, 12.1, 0.6, i % 2 ? C.bg : C.panel);
-    txt(s, w[0], { x: 0.85, y, w: 3.4, h: 0.6, fontFace: F.mono, fontSize: 12.5, color: C.gold, valign: "middle" });
-    txt(s, w[1], { x: 4.5, y, w: 8.0, h: 0.6, fontSize: 13, color: C.body, valign: "middle", fit: "shrink" });
-  });
-
-  takeaway(s, "Where the distribution and this deck disagree, the distribution is current.", 6.4);
-}
-
-// Two instruments
-{
-  const s = slide("PART V · SETTINGS AND SIGNALS", "Two instruments the peer already provides",
-    "Both of these ship with the peer library and cost nothing to adopt.\n\nd/sync-index returns a database whose INDEX — not merely whose log — includes a given t. d/sync waits on the log alone. Under light load the two look identical; under load, when indexing lags behind the log, they diverge, and code that assumed d/sync was enough starts reading through the memory index instead of the index it expected.\n\nThe tx-report queue lets any peer observe transactions as they land. The datom count in the example decomposes: 401 = 100 readings × 4 attributes + 1 :db/txInstant. A count that does not decompose is a signal about transaction shape.\n\nIn production the queue is used for audit, cache invalidation and CDC. In class, as a throughput monitor.\n\nWhy sync and sync-index differ: the log receives a transaction immediately, the durable index receives it at the next merge. A database whose log includes t answers queries correctly — it just answers them by reading the memory index as well as the durable one. Under indexing lag that is a difference in cost, not in correctness.\n\nSo sync is enough for read-your-writes, which is about a single recent transaction. sync-index is what a bulk read wants, because it wants the work already merged into the sorted index rather than merged again per query.");
-
-  panel(s, 0.6, 1.45, 5.85, 2.5, "d/sync  vs  d/sync-index");
-  box(s, 0.9, 2.1, 5.25, 0.65, { label: "d/sync  →  waits on the LOG", fill: C.panel2, size: 13.5, mono: true });
-  box(s, 0.9, 2.9, 5.25, 0.65, { label: "d/sync-index  →  waits on the INDEX", fill: C.goldHi, size: 13.5, mono: true });
-  txt(s, "identical under light load · they diverge under load", { x: 0.9, y: 3.6, w: 5.25, h: 0.3, fontSize: 11.5, color: C.meta, italic: true, align: "center" });
-
-  panel(s, 6.85, 1.45, 5.85, 2.5, "THE TX-REPORT QUEUE");
-  codeBlock(s, ":t 1001  :datoms 401\n:t 1102  :datoms 401", 7.1, 2.05, 5.35, 0.85);
-  txt(s, "401 = 100 readings × 4 attrs + 1 :db/txInstant\naudit · cache invalidation · CDC · throughput monitor",
-    { x: 7.1, y: 3.0, w: 5.35, h: 0.8, fontSize: 12, color: C.body });
-
-  txt(s, "SIGNALS TO ALERT ON — each one maps onto the loop", { x: 0.6, y: 4.15, w: 12.1, h: 0.35, fontSize: 13, color: C.gold, bold: true, charSpacing: 1 });
-  const sig = [
-    ["alarms of any kind", "the transactor is telling you directly"],
-    ["indexing job duration", "the drain is falling behind"],
-    ["transaction latency p99", "throttling"],
-    ["storage read/write time", "the bottleneck is storage"],
-    ["memcached hit ratio", "the shared tier is not being shared"],
-  ];
-  sig.forEach((g, i) => {
-    const y = 4.55 + i * 0.42;
-    txt(s, "▸  " + g[0], { x: 0.8, y, w: 4.6, h: 0.4, fontSize: 12.5, color: C.ink, valign: "middle", fit: "shrink" });
-    txt(s, g[1], { x: 5.6, y, w: 6.9, h: 0.4, fontSize: 12.5, color: C.body, valign: "middle", fit: "shrink" });
-  });
-
-  waypoint(s, "waypoint — labs §5", "MEM",
-    "The memory-index demo is [MEM]; the metrics-callback contract is read from the distribution.",
-    { y: 6.7, h: 0.75 });
+  takeaway(s, "Optional tiers fail soft. And cache behaviour is observed, never queried.", 6.15);
+  cases(s, [
+    "Memcached restart: latency up, correctness untouched",
+    "\"Did the cache help?\" — run it twice and compare",
+  ]);
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// PART VI · DEPLOYMENT
-// ═══════════════════════════════════════════════════════════════════
-
-sectionSlide("VI", "Deployment", "A peer carries a cache — so shipping one is not like shipping a stateless service",
-  "Everything in this part follows from one fact: a peer is not stateless. It carries a cache, and that cache is the difference between a 10 ms read and a 1,000 ms one. A deployment procedure that treats peers as interchangeable stateless containers reproduces the Part III cold-cache burst on every release.\n\nA stateless service can be replaced instance for instance with no warm-up, because nothing was accumulated. A peer accumulated a cache, and that cache took time and storage traffic to build. Everything in this part follows from that one difference.");
-
-// Ready but cold
-{
-  const s = slide("PART VI · DEPLOYMENT", "\"Up\" and \"ready\" are not the same thing",
-    "A readiness probe that succeeds at process start reports a peer that is up and cold. It will accept traffic and serve every one of the first requests from storage.\n\nThe fix is to make readiness mean warm. Warm the segments the service actually reads — index ranges over the attributes it queries — and only then report ready. That moves the cold-read cost ahead of the first request instead of onto it.\n\nNote pmap in warm!: warming uses the parallel-slice pattern from Part IV for a different purpose. And note that it returns basis-t alongside :ready? — useful for the read-your-writes contract on the next slide.\n\nWhy the default probe is wrong here rather than merely imprecise: it is not reporting the wrong thing about the process, it is reporting about the wrong subject. The process genuinely is ready. The cache is not, and the cache is what decides the latency the caller sees.\n\nFailure signature: the first few hundred requests to a fresh instance are slow, and the effect is gone before anyone can attach to it. It never reproduces on a warm instance, which is where people go looking.");
-
-  box(s, 0.6, 1.45, 5.85, 1.9, { label: "process started  →  READY", sub: "cache empty · every read goes to storage · p99 in the seconds", fill: C.badBg, border: C.bad, size: 16, subSize: 12.5 });
-  fatArrow(s, 6.55, 2.05, 0.7, 0.7, pres.shapes.RIGHT_ARROW, { fill: C.rule });
-  box(s, 7.4, 1.45, 5.3, 1.9, { label: "warmed  →  READY", sub: "segments resident · the first request is as fast as the hundredth", fill: C.okBg, border: C.ok, size: 16, subSize: 12.5, subH: 0.62 });
-
-  codeBlock(s,
-    "(defn warm! [conn]\n  (let [db (d/db conn)]\n    (doall (pmap (fn [[lo hi]] (count (seq (d/index-range db :reading/t lo hi))))\n                 (partition 2 1 (range 0 20001 2500))))\n    {:ready? true :basis-t (d/basis-t db)}))",
-    0.6, 3.55, 12.1, 1.85);
-
-  takeaway(s, "Warm the segments the service reads, then report ready. Readiness should mean warm, not alive.", 5.55);
-  waypoint(s, "waypoint — labs §6", "MEM",
-    "Run (warm!), then the d/sync read-your-writes check on the next slide.",
-    { y: 6.25, h: 0.75 });
-}
-
-// Read your own writes
-{
-  const s = slide("PART VI · DEPLOYMENT", "Reading your own writes across a fleet of peers",
-    "A fresh peer starts at whatever t storage gives it. So a request that arrives just after a write made through a DIFFERENT peer can legitimately be served a database value that does not include that write. Nothing is broken; the peer is simply behind.\n\nThe contract that fixes it is to pass the t along with the request and have the reading peer d/sync to it before answering. That is the consistency contract of a multi-peer deployment, and it belongs in the request envelope — a header or a field — rather than in a sleep.\n\nIf what you need is the index rather than the log, sync-index, per Part V.\n\nWhy the peer is behind rather than wrong: its database value is a consistent snapshot at some t. Answering from t-1 is a correct answer to a slightly older question. Nothing is corrupt and nothing will be logged as an error, which is what makes this hard to find.\n\nWhy a sleep does not fix it: a sleep guesses at a delay that varies with load. d/sync waits on the actual condition, and a deref with a timeout also bounds the wait.\n\nFailure signature: a write followed by a read that does not see it, reproducible only under load or with more than one peer — and never in a single-peer test environment, which is where the code was written.");
-
-  txt(s, "WITHOUT the contract", { x: 0.6, y: 1.4, w: 5.85, h: 0.35, fontSize: 13, color: C.bad, bold: true, charSpacing: 1 });
-  box(s, 0.6, 1.8, 2.7, 0.7, { label: "peer A", sub: "writes at t=21011", fill: C.warnBg, border: C.warn, size: 13, subSize: 10.5 });
-  box(s, 3.75, 1.8, 2.7, 0.7, { label: "peer B", sub: "still at t=20990", fill: C.badBg, border: C.bad, size: 13, subSize: 10.5 });
-  arrow(s, 0.9, 2.6, 0.9, 3.15, { color: C.warn, head: false });
-  arrow(s, 4.05, 2.6, 4.05, 3.15, { color: C.bad, head: false });
-  box(s, 0.6, 3.15, 5.85, 0.65, { label: "the caller reads back … and the write is missing", fill: C.badBg, border: C.bad, size: 13 });
-
-  txt(s, "WITH the contract", { x: 6.85, y: 1.4, w: 5.85, h: 0.35, fontSize: 13, color: C.ok, bold: true, charSpacing: 1 });
-  box(s, 6.85, 1.8, 2.7, 0.7, { label: "peer A", sub: "writes, returns t", fill: C.warnBg, border: C.warn, size: 13, subSize: 10.5 });
-  box(s, 10.0, 1.8, 2.7, 0.7, { label: "peer B", sub: "d/sync to that t", fill: C.okBg, border: C.ok, size: 13, subSize: 10.5 });
-  arrow(s, 9.55, 2.15, 10.0, 2.15, { color: C.ok, label: "t travels with the request", labelW: 3.0, labelDy: -0.35 });
-  arrow(s, 7.15, 2.6, 7.15, 3.15, { color: C.ok, head: false });
-  arrow(s, 10.3, 2.6, 10.3, 3.15, { color: C.ok, head: false });
-  box(s, 6.85, 3.15, 5.85, 0.65, { label: "the caller reads back … and sees the write", fill: C.okBg, border: C.ok, size: 13 });
-
-  codeBlock(s, "(d/basis-t (deref (d/sync conn t) 5000 nil))\n;; => 21011      the t that was written", 0.6, 4.1, 7.4, 1.15);
-  bar(s, 8.2, 4.1, 4.5, 1.15, C.panel, { round: true });
-  txt(s, "Pass the t with the request.\nFor the index rather than the log:\nd/sync-index.",
-    { x: 8.45, y: 4.25, w: 4.0, h: 0.9, fontSize: 12.5, color: C.body });
-
-  takeaway(s, "Passing the t with the request IS the consistency contract of a multi-peer deployment.", 5.55);
-  note(s, "Deref with a timeout: an unbounded sync is a stalled thread waiting on a transactor that may not exist.", 6.35);
-}
-
-// Rollout order
-{
-  const s = slide("PART VI · DEPLOYMENT", "Rollout order — and why it is safe in this order",
-    "Four steps, and step 1 is the one that differs from SQL.\n\nDatomic schema is additive. A new attribute is a new entity; an old peer simply never asks about it. So you ship schema first, with no lock, no ALTER, no migration window and no coordination with the code rollout. That is what makes the rest of the order safe: by the time new code arrives, the schema it needs is already there.\n\nStep 2 is Part III's mitigation number 3. Step 3 is the previous slide's warm!. Step 4 is Part II's failover, this time on purpose: start the new-version standby, stop the old active, spend one bounded write pause.\n\nFrom a peer's point of view, a rolling transactor upgrade and a transactor crash are indistinguishable. The same mechanism handles both, which is what makes the measured window from Part II the relevant number.\n\nWhy additive schema removes the migration window: a new attribute is a new entity in the same database, asserted by an ordinary transaction. Nothing is rewritten, nothing is locked, and no existing datom is touched. A peer that does not know the attribute never queries it. So schema can ship days ahead of the code that uses it.\n\nThe order is not a convention — each step depends on the previous one already being true. Schema before code, so the code finds what it needs. Peers in waves before traffic, so the caches are never all cold at once. Warm before ready, so the first request is not the one that pays. Transactor last, because it is the only step that costs a write pause.");
-
-  const steps = [
-    ["1", "ship the SCHEMA", "additive → old peers ignore what's new", "no lock · no ALTER · no migration window", C.gold],
-    ["2", "roll peers in WAVES", "avoids the cold-cache burst", "Part III, mitigation 3", C.gold],
-    ["3", "WARM, then report ready", "the cost moves ahead of the first request", "the previous slide's warm!", C.gold],
-    ["4", "roll the TRANSACTOR", "one bounded write pause, on purpose", "Part II's failover, deliberately", C.bad],
-  ];
-  steps.forEach((st, i) => {
-    const y = 1.5 + i * 1.12;
-    bar(s, 0.6, y, 12.1, 0.95, i % 2 ? C.bg : C.panel, { round: true });
-    bar(s, 0.6, y, 0.85, 0.95, st[4], { round: true });
-    txt(s, st[0], { x: 0.6, y, w: 0.85, h: 0.95, fontFace: F.serif, fontSize: 26, color: C.white, align: "center", valign: "middle" });
-    txt(s, st[1], { x: 1.7, y: y + 0.14, w: 4.4, h: 0.4, fontSize: 16, color: C.ink, bold: true, fit: "shrink" });
-    txt(s, st[3], { x: 1.7, y: y + 0.54, w: 4.4, h: 0.32, fontSize: 11.5, color: C.meta, italic: true });
-    txt(s, st[2], { x: 6.4, y, w: 6.1, h: 0.95, fontSize: 14, color: C.body, valign: "middle", fit: "shrink" });
-    if (i < 3) arrow(s, 1.02, y + 0.95, 1.02, y + 1.12, { color: C.rule, width: 1.2 });
-  });
-
-  bar(s, 0.6, 6.05, 12.1, 0.85, C.panel2, { round: true });
-  txt(s, "From a peer, a transactor upgrade and a transactor outage are indistinguishable — the same mechanism handles both.",
-    { x: 0.9, y: 6.05, w: 11.6, h: 0.85, fontSize: 14.5, color: C.ink, valign: "middle", fit: "shrink" });
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// CLOSE
+// SUMMARY + CLOSE
 // ═══════════════════════════════════════════════════════════════════
 
 // Summary
 {
-  const s = slide("SUMMARY", "The model the settings operate on",
-    "Four verbs. Every part of the class attaches to one of them.\n\nFails: storage totally, the transactor for writes only, peers locally.\nWaits: writers wait — during failover, and during throttling. Those are the only two places anything waits.\nScales: reads by peers × cores, writes by pipelining, and nothing scales inside one query.\nCosts: storage, whenever a cache is cold.\n\nThe settings tables in Part V are lookups. This table is the model they operate on.\n\nUsed as a diagnosis path: any symptom lands on one of the four rows. Writes failing is FAILS, and the question is which component. Writes slow is WAITS, and there are only two places anything waits. Reads slow is COSTS, so ask which tier answered — unless it is a single query, in which case SCALES already says that more cores will not help.");
+  const s = slide("SUMMARY", "Four verbs",
+    "The whole class compresses into four rows, and any performance symptom lands on one of them.\n\nFails: only storage is fatal. A dead transactor pauses writes; a dead peer is local.\n\nWaits: writers wait, in exactly two places — during a failover, and during back-pressure. If writes are slow with no errors, it is one of those two.\n\nScales: reads scale with peers and cores; writes scale only by batching. Nothing scales inside a single query.\n\nCosts: storage, whenever a cache is cold. If reads are slow, ask which tier answered.\n\nUse it as a diagnosis path: writes failing is FAILS; writes slow is WAITS; reads slow is COSTS; and 'can we throw cores at it' is SCALES.");
 
   const rows = [
-    ["FAILS",  "storage totally  ·  transactor for writes  ·  peers locally", C.bad, C.badBg, "Parts I–II"],
-    ["WAITS",  "writers — during failover, and during throttling",            C.warn, C.warnBg, "Parts II & V"],
-    ["SCALES", "reads: peers × cores  ·  writes: by pipelining",              C.ok, C.okBg, "Part IV"],
-    ["COSTS",  "storage, whenever a cache is cold",                           C.cool, C.coolBg, "Parts III & VI"],
+    ["FAILS",  "only storage is fatal · transactor = writes pause · a peer = local", C.bad, C.badBg, "the map · II"],
+    ["WAITS",  "writers — during failover, and during back-pressure", C.warn, C.warnBg, "Part II"],
+    ["SCALES", "reads: peers × cores · writes: only batching", C.ok, C.okBg, "Part III"],
+    ["COSTS",  "storage, whenever a cache is cold", C.cool, C.coolBg, "Parts I & IV"],
   ];
   rows.forEach((r, i) => {
     const y = 1.6 + i * 1.15;
     bar(s, 0.6, y, 12.1, 1.0, r[3], { round: true });
     bar(s, 0.6, y, 0.09, 1.0, r[2]);
     txt(s, r[0], { x: 0.95, y, w: 2.3, h: 1.0, fontSize: 16, color: r[2], bold: true, charSpacing: 1.5, valign: "middle" });
-    txt(s, r[1], { x: 3.4, y, w: 7.3, h: 1.0, fontSize: 15, color: C.ink, valign: "middle", fit: "shrink" });
+    txt(s, r[1], { x: 3.4, y, w: 7.3, h: 1.0, fontSize: 14.5, color: C.ink, valign: "middle", fit: "shrink" });
     txt(s, r[4], { x: 10.8, y, w: 1.7, h: 1.0, fontSize: 11.5, color: C.meta, align: "right", valign: "middle" });
   });
 
-  takeaway(s, "The Part V settings are lookups. This table is the model they operate on.", 6.35);
+  takeaway(s, "Any performance symptom lands on one of these four rows. Start there.", 6.35);
+  cases(s, [
+    "Writes failing → FAILS · writes slow → WAITS · reads slow → COSTS",
+  ]);
 }
 
 // Where to go next
 {
   const s = slide("CLOSE", "Where to go next",
-    "The Production class covers the paths and storage layers this class assumed. infra/HA.md has the two-transactor setup if Part II was not run live.\n\nOn Cloud: the model is the same and the operational surface is different. Query groups are Part IV's read scaling packaged as an autoscaling group, and failover is managed by the platform rather than by you. Everything in Parts I, III, IV and V still applies.\n\nThe failover drill is worth repeating on your own staging environment: the window depends on that infrastructure, so the applicable number is the measured one.");
+    "For depth on everything this class kept broad: the Production class has the write path, read path, settings and the backup drill in full detail.\n\ninfra/HA.md has the two-transactor setup, to run Part II's failover yourself — worth doing once on your own staging environment.\n\nOn Datomic Cloud the model is the same and the platform does the operating: failover is managed for you, and query groups are Part III's read scaling packaged as an autoscaling group.");
 
   const items = [
-    ["src/datomic_infra/labs.clj", "Datomic in Production — the paths and storage layers this class assumed", C.panel],
-    ["infra/HA.md", "the two-transactor setup, if Part II was not run live", C.panel],
-    ["Datomic Cloud", "query groups = Part IV's read scaling as an autoscaling group; failover is managed by the platform. Same model, different operational surface.", C.coolBg],
+    ["src/datomic_infra/labs.clj", "Datomic in Production — the write path, read path, settings and backup drill in full detail", C.panel],
+    ["infra/HA.md", "the two-transactor setup — run Part II's failover yourself", C.panel],
+    ["Datomic Cloud", "same model, managed operations: failover handled by the platform; query groups = Part III's read scaling as an autoscaling group", C.coolBg],
   ];
   items.forEach((it, i) => {
-    const y = 1.5 + i * 1.25;
-    bar(s, 0.6, y, 12.1, 1.1, it[2], { round: true });
-    txt(s, it[0], { x: 0.9, y: y + 0.14, w: 11.5, h: 0.38, fontFace: F.mono, fontSize: 14, color: C.gold, bold: true });
-    txt(s, it[1], { x: 0.9, y: y + 0.55, w: 11.5, h: 0.5, fontSize: 13.5, color: C.body, fit: "shrink" });
+    const y = 1.6 + i * 1.3;
+    bar(s, 0.6, y, 12.1, 1.15, it[2], { round: true });
+    txt(s, it[0], { x: 0.9, y: y + 0.15, w: 11.5, h: 0.38, fontFace: F.mono, fontSize: 14, color: C.gold, bold: true });
+    txt(s, it[1], { x: 0.9, y: y + 0.57, w: 11.5, h: 0.5, fontSize: 13.5, color: C.body, fit: "shrink" });
   });
 
-  bar(s, 0.6, 5.3, 12.1, 1.15, C.okBg, { round: true });
-  bar(s, 0.6, 5.3, 0.09, 1.15, C.ok);
-  txt(s, "Repeat the failover drill on your own staging environment.", { x: 0.95, y: 5.45, w: 11.5, h: 0.4, fontSize: 16, color: C.ink, bold: true });
-  txt(s, "The window depends on that infrastructure — the only number worth quoting is the one you measured.",
-    { x: 0.95, y: 5.88, w: 11.5, h: 0.4, fontSize: 13.5, color: C.body });
+  bar(s, 0.6, 5.6, 12.1, 1.0, C.okBg, { round: true });
+  bar(s, 0.6, 5.6, 0.09, 1.0, C.ok);
+  txt(s, "Carry the model, look up the knobs.", { x: 0.95, y: 5.72, w: 11.5, h: 0.4, fontSize: 16, color: C.ink, bold: true });
+  txt(s, "Four topics, three steps each: how it works, an easy example, the catches.",
+    { x: 0.95, y: 6.14, w: 11.5, h: 0.4, fontSize: 13, color: C.body });
+  cases(s, [
+    "Run the failover drill once on your own staging environment",
+  ]);
 }
+
 // ═══════════════════════════════════════════════════════════════════
 // QA CHECKS
 // ═══════════════════════════════════════════════════════════════════
@@ -1378,6 +1037,16 @@ if (process.env.DECK_QA) {
           console.log(`slide ${i + 1} COLLIDE   «${sl.texts[a].str.slice(0, 34).replace(/\n/g, "⏎")}»  ×  «${sl.texts[b].str.slice(0, 34).replace(/\n/g, "⏎")}»`);
         }
   });
+  if (process.env.DECK_QA === "space") {
+    QA.forEach((sl, i) => {
+      // ignore the CASES band (y >= 6.9) and the page-number box, so this
+      // reports the room available for body content, not the room below the strip
+      const bot = [...sl.texts.filter(t => (t.o.w || 1) > 0.9 && (t.o.y || 0) < 6.9).map(t => (t.o.y || 0) + (t.o.h || 0.3)),
+                   ...sl.shapes.filter(sh => (sh.h || 0) < 7 && (sh.y || 0) < 6.9).map(sh => (sh.y || 0) + (sh.h || 0))]
+                  .reduce((m, v) => Math.max(m, v), 0);
+      console.log(`slide ${String(i + 1).padStart(2)}  content ends ${bot.toFixed(2)}"  room ${(6.95 - bot).toFixed(2)}"`);
+    });
+  }
   console.log(issues ? `\n${issues} QA issues` : "\nQA clean");
 }
 
