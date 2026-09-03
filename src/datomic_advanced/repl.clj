@@ -130,6 +130,13 @@
 ;;   homogeneous   :db/tupleType   — 2..8 values of one type, you write
 ;; The killer app: multi-attribute uniqueness and composite-key range
 ;; scans — things that pre-tuples needed fabricated string keys.
+;;
+;; WHY they exist at all: a datom is [E A V tx op], and V is ONE scalar.
+;; The indexes sort by that single V; uniqueness hashes that single V.
+;; Anything you need per-PAIR — unique per (a,b), scan by (a,b) prefix —
+;; requires the pair to BE the V. A tuple is exactly that: a composite
+;; value that stays comparable (slot by slot, left to right, nil lowest)
+;; and so can live in AVET like any scalar.
 
 (comment
 
@@ -188,6 +195,11 @@
   ;;
   ;; The transactor computed :seat/flight+number from the members and
   ;; will keep it in sync whenever a member attribute changes.
+  ;;
+  ;; WHEN, precisely: composites are (re)computed inside transaction
+  ;; processing — after tempids resolve and upserts land, before the
+  ;; uniqueness checks run. That pipeline order is the master key to
+  ;; every catch below.
 
   ;; The flight's eid, used inside tuple values below. (The FLIGHT
   ;; entity has no tuple of its own — yet; CATCH 4 gives it one.)
@@ -214,6 +226,9 @@
     {:datoms-in-tx (count (:tx-data r))          ; just the txInstant datom
      :value-now    (:seat/flight+number (d/pull (db) '[*] sid))})
   ;; => {:datoms-in-tx 1, :value-now [17592186045xxx "12A"]}
+  ;;    Think "materialized column": derived datoms belong to the
+  ;;    system, and the pipeline replaces whatever you claim with what
+  ;;    the members actually say — silence included.
 
 
   ;; Members move, the tuple follows — atomically, same transaction:
@@ -236,6 +251,12 @@
   (anomaly @(d/transact conn [{:seat/flight AD100}]))
   ;; => ":db.error/unique-conflict Unique conflict: :seat/flight+number,
   ;;     value: [17592186045xxx nil] already held by: ..."
+  ;;
+  ;;    Why no upsert? Upsert happens during TEMPID RESOLUTION, keyed
+  ;;    on values you asserted yourself. The composite does not exist
+  ;;    yet at that stage — it is computed later in the pipeline — so
+  ;;    when [fid nil] finally materializes, identity can only mean
+  ;;    "collision", never "same entity".
 
   ;; repair the seat back to 12C before moving on — and notice the
   ;; lookup: the partial [fid nil] tuple is itself a valid lookup value
@@ -265,6 +286,13 @@
   ;; Rules of composites: 2–8 member attrs, every member must be
   ;; cardinality-one (card-many members are rejected at install with
   ;; :db.error/invalid-tuple-attrs).
+  ;;
+  ;; Why no backfill? Installing schema writes a handful of datoms —
+  ;; Datomic never rewrites your existing datoms behind your back, and
+  ;; a backfill would be an unbounded write hiding inside a schema tx.
+  ;; The migration is explicitly yours: re-assert one member per
+  ;; entity (in production: in batches, minding the back-pressure
+  ;; lessons from the at-scale class).
 
 
   ;; ── 1.3 Heterogeneous tuples (:db/tupleTypes) ──────────────────────
@@ -284,12 +312,19 @@
 
   ;; nil slots are legal in written tuples too — [-8.13 nil] is fine.
   ;; What is NOT fine is arity: the value must match the declared slots.
+  ;; And tuples compare like Clojure vectors — slot by slot, nil first.
+  ;; That total order is their entry ticket into AVET, and what makes
+  ;; the range scans of §1.5 meaningful.
 
 
   ;; ── 1.4 Homogeneous tuples (:db/tupleType) ─────────────────────────
   ;; 2..8 values of ONE type. Compare with cardinality-many:
   ;;   card-many  = a SET  (no order, no duplicates, no fixed size)
   ;;   tuple      = a VECTOR (order preserved, up to 8)
+  ;; Granularity matters too: the whole tuple is ONE datom — there is
+  ;; no "assert into slot 2"; changing a day rewrites the vector.
+  ;; Card-many gives you a datom PER value (independent assert/retract,
+  ;; per-value history); tuples trade that away for order + compactness.
   ;; :flight/days keeps weekday ORDER — a card-many keyword attr would
   ;; shuffle [:mon :wed :fri] into set order and lose you nothing here,
   ;; but try modeling "outbound then return" legs without order...
@@ -322,6 +357,11 @@
      :reverse-nav  (d/q '[:find ?e :in $ ?gru :where [?e :probe/pair ?gru]] (db) gru)})
   ;; => {:vaet-entries 0, :reverse-nav #{}}
   ;;    Use real ref attrs for graph edges; tuples only for opaque pairs.
+  ;;    Mechanism: VAET is built only from datoms whose ATTRIBUTE is of
+  ;;    valueType ref. A tuple datom's V is the vector itself; the longs
+  ;;    inside are opaque to every index. Hence no reverse pull, no
+  ;;    retractEntity cleanup — and a retracted airport leaves a
+  ;;    dangling number in your tuple forever.
 
 
   ;; ── 1.5 The payoff: composite-key RANGE SCANS ──────────────────────
@@ -335,6 +375,8 @@
   ;; This is the tuple version of a SQL compound index — and the reason
   ;; composites replaced the old "concatenate strings into a fake key"
   ;; trick from the days before tuples existed.
+  ;; (d/index-range is start-inclusive, end-exclusive — half-open, like
+  ;;  subvec — so consecutive ranges tile with no overlap and no gaps.)
   )
 
 
@@ -357,6 +399,13 @@
   ;;
   ;; On a durable system the new index materializes at the next indexing
   ;; job; on mem it is immediate. EAVT/AEVT/VAET always exist regardless.
+  ;;
+  ;; The economics behind the flag: every datom is stored once per
+  ;; covering index, and AVET — sorted by VALUE — is the widest and
+  ;; churniest of them. Pro makes it opt-in per attribute; Cloud eats
+  ;; the cost everywhere for uniformity. :db/index is free at query
+  ;; time and paid at write/index time — the cache-ladder trade from
+  ;; the at-scale class, retold as a schema flag.
 
 
   ;; ── 2.2 The uniqueness LIFECYCLE ───────────────────────────────────
@@ -378,6 +427,11 @@
   ;; (Edge inside the edge: on an attr with NO datoms yet, the same
   ;;  one-step alter sails through — nothing to index, nothing to
   ;;  validate. The refusal is about existing data, not ceremony.)
+  ;;
+  ;; Why AVET is non-negotiable here: the uniqueness check at transact
+  ;; time IS an AVET lookup — "who already holds this value?". Without
+  ;; the index that answer would need a full scan on every write, and
+  ;; Datomic refuses to fake it.
 
   ;; The two-step: index first (on a durable system, WAIT for the
   ;; index job — d/sync-index — between the steps), then unique:
@@ -415,6 +469,12 @@
   ;;
   ;; Choosing: external ids you RE-ASSERT on import -> identity.
   ;; Ids that must never collide silently (documents, serials) -> value.
+  ;;
+  ;; Mechanically both flavors are the same AVET probe; the difference
+  ;; is WHEN it acts. identity participates in tempid RESOLUTION (your
+  ;; "new" entity becomes the existing one before any datom lands);
+  ;; value only VETOES at the end. Resolution versus constraint —
+  ;; that is the entire difference.
 
 
   ;; ── 2.4 unique + cardinality-many: the alias table ─────────────────
@@ -460,6 +520,14 @@
   ;;
   ;; Also not alterable: :db/valueType, :db/tupleAttrs, :db/isComponent
   ;; on data already written against them. Plan those at install.
+  ;;
+  ;; The pattern behind the whole table: schema IS data (attributes are
+  ;; entities, alters are plain datoms about them), but each schema
+  ;; flag drags enforcement machinery along. An alter is allowed iff
+  ;; that machinery can honor it WITHOUT rewriting or re-deriving old
+  ;; datoms: index yes (next index job builds it), cardinality down
+  ;; only if data already conforms, fulltext never (it would demand a
+  ;; full Lucene backfill).
 
 
   ;; ── 2.6 Renaming idents (and the ghost that stays) ─────────────────
@@ -479,6 +547,12 @@
   (d/q '[:find ?v . :where [?e :passenger/name "Zed"] [?e :probe/handle ?v]] (db))
   ;; => "zed"                   — written via the old name, read via the new.
   ;; Corollary: NEVER recycle a retired ident for a new attribute.
+  ;;
+  ;; Under the hood idents are an interned two-way map (keyword <-> eid)
+  ;; that every peer caches in full — that is why ident resolution is
+  ;; "free", and why old names must keep resolving: EDN files on disk,
+  ;; code in prod and datoms in the log all still mention them long
+  ;; after the rename.
 
   ;; Bonus footgun: :db/ident is itself :db.unique/identity, so a map
   ;; tx that "creates" an entity with an EXISTING ident actually
@@ -527,6 +601,11 @@
     (d/pull (db) '[*] doc))
   ;; => {:db/id ..., :document/kind :visa, :document/number "ORPHAN-1"}
   ;;    Orphan sweeps are on you. (Or always retract the entity, not the ref.)
+  ;;
+  ;;    The asymmetry is principled: :db/retract removes ONE datom,
+  ;;    while :db/retractEntity performs an entity-level WALK — every
+  ;;    datom about e, every ref to e, recursing through the component
+  ;;    closure. :db/isComponent changes the walk, not the datoms.
 
 
   ;; ── 2.8 :db/noHistory is a PROMISE, not a guarantee ────────────────
@@ -545,6 +624,12 @@
   ;; history exists until the next index job, and (d/history db) may
   ;; return it meanwhile. Treat noHistory as a storage-size hint —
   ;; never as a privacy tool. For "must be gone", see excision (§4.7).
+  ;;
+  ;; Why "at indexing time"? History has no separate store — it is
+  ;; simply the accumulated datoms inside immutable index segments.
+  ;; Old values can only disappear when segments get rewritten, and
+  ;; the one thing that rewrites segments is the background indexing
+  ;; job. noHistory (and excision, §4.7) ride that schedule.
 
 
   ;; ── 2.9 Attribute predicates ───────────────────────────────────────
@@ -557,6 +642,9 @@
   ;; Runs in the TRANSACTOR: on a real system the fn's namespace must be
   ;; deployed to the transactor's classpath (see §0 note). Keep them
   ;; pure, total, and FAST — they run inside the write serialization.
+  ;; (Conceptually: the SQL CHECK constraint, relocated to the one
+  ;;  place in the architecture where a check cannot race — the
+  ;;  transactor.)
 
 
   ;; ── 2.10 Entity specs: :db.entity/attrs + :db.entity/preds ────────
@@ -658,9 +746,19 @@
   (anomaly
     (d/q '[:find ?a ?b :in $ % :where (reachable ?a ?b)] (db) rules))
   ;; => ":db.error/insufficient-binding [?a] not bound in clause: (reachable ?a ?b)"
+  ;;
+  ;; Unbound would have meant "derive reachability for the WHOLE graph,
+  ;; then filter" — the required binding turns a global closure into a
+  ;; directed search from your starting point. Same datalog, wildly
+  ;; different cost; put [brackets] on any recursive rule's entry var.
 
 
   ;; ── 3.3 Aggregates, and the :with trap ─────────────────────────────
+  ;; Datalog results are RELATIONS — sets of tuples, so duplicates are
+  ;; impossible BY DEFINITION, not by accident. Aggregates run over
+  ;; that set unless you widen it: :with appends invisible columns to
+  ;; the basis (kept for the arithmetic, dropped from the output).
+  ;; Forgetting :with is the classic silent-wrong-number bug.
   (d/q '[:find (min ?p) (max ?p) (count ?f) :where [?f :flight/price ?p]] (db))
   ;; => [[199 3400 12]]
 
@@ -721,9 +819,19 @@
   ;;
   ;; (:xform exists in the grammar but Pro gates it behind an
   ;;  extensions.edn opt-in — without it you get a not-found anomaly.)
+  ;;
+  ;; Query and pull are complementary engines: datalog UNIFIES ("which
+  ;; entities satisfy these constraints?"), pull NAVIGATES ("from this
+  ;; entity, project that tree off EAVT"). The (pull ?e pattern)
+  ;; find-spec is the hinge that lets each do what it is best at.
 
 
   ;; ── 3.5 Negation, disjunction, expression clauses ──────────────────
+  ;; Negation here is set DIFFERENCE over rows already produced: the
+  ;; inner pattern runs against the bindings flowing in from outside
+  ;; and subtracts the matches. That is why not/not-join need their
+  ;; unifying vars bound first — "everything not in the database" is
+  ;; not a computable set.
   ;; not — airports nobody departs from:
   (d/q '[:find [?code ...]
          :where [?a :airport/code ?code]
@@ -802,6 +910,10 @@
   ;;
   ;; Same technique joins two DIFFERENT databases (staging vs prod),
   ;; or a db against d/since, or three of them. Sources are just args.
+  ;; It falls straight out of immutability: a db value is a pointer
+  ;; into a persistent tree, and as-of is that same tree read through
+  ;; a t-filter — so joining prod against its own past costs no copy,
+  ;; no restore, no ceremony.
 
 
   ;; ── 3.7 Time as data: history, since, and the LOG ──────────────────
@@ -829,10 +941,20 @@
          :in $ ?log
          :where [(tx-ids ?log nil nil) [?tx ...]]]
        (db) (d/log conn))
-  ;; => 47                      — every tx since creation (yours will vary).
+  ;; => 45                      — every tx since the db was created; the
+  ;;    exact count depends on which forms you evaluated on the way here.
+  ;;
+  ;; The mental model: EAVT/AEVT/AVET/VAET answer "about this entity /
+  ;; attribute / value"; the LOG answers "at this point in time". It is
+  ;; the write-ahead journal promoted to a queryable index — between
+  ;; the two families, every datom is reachable by content OR by time.
 
 
   ;; ── 3.8 Below the query engine: raw index access ───────────────────
+  ;; A peer holds indexes as immutable, shared, lazily fetched segments;
+  ;; d/datoms is a plain cursor over them — no planner, no unification,
+  ;; nothing but the walk. When your access pattern IS an index order,
+  ;; the fastest query is no query at all.
   ;; d/datoms = iterate an index directly. AVET on an indexed attr is
   ;; a sorted scan — top-3 cheapest flights with ZERO query overhead:
   (->> (d/datoms (db) :avet :flight/price)
@@ -855,7 +977,10 @@
     {:printed (str gru)                        ; lazy: nothing realized yet
      :departures (count (:flight/_origin gru))
      :one-hop (-> gru :flight/_origin first :flight/dest :airport/city)})
-  ;; => {:printed "#:db{:id ...}", :departures 6, :one-hop "Recife"}
+  ;; => {:printed "#:db{:id ...}", :departures 6, :one-hop "Miami"}
+  ;;    (Your city may differ! :flight/_origin is a SET — entity-api
+  ;;     collections are unordered, so `first` picks arbitrarily.
+  ;;     Sort before you lean on order.)
 
   ;; d/qseq — query results as a LAZY seq: pay pull/marshalling costs
   ;; as you consume, not up front. Same query grammar, map form:
@@ -899,6 +1024,12 @@
   ;; Same result set, different intermediate row counts — on real data
   ;; that difference is your latency. Start selective, stay narrow.
   ;; (d/query also takes :timeout ms — self-defense for ad-hoc queries.)
+  ;;
+  ;; Why it matters so much: clauses run essentially in the order you
+  ;; wrote them, each unifying against the rows the previous one left
+  ;; (predicates get fused into the clause that binds their vars — see
+  ;; SHARP). There is no cost-based optimizer: the planner is you, and
+  ;; :query-stats is your EXPLAIN ANALYZE.
   )
 
 
@@ -949,6 +1080,12 @@
   ;;
   ;; This is the audit table you never had to build. Works for schema
   ;; txes too (annotate your migrations!).
+  ;;
+  ;; Notice this needed no feature: a tx is an entity carrying
+  ;; :db/txInstant because EVERYTHING is datoms, and "datomic.tx" is
+  ;; just a well-known tempid for the current tx's eid. Audit trails,
+  ;; provenance, blame — all fall out of one design decision: writes
+  ;; are data too.
 
 
   ;; ── 4.2 Compare-and-swap: :db/cas ──────────────────────────────────
@@ -960,6 +1097,12 @@
   (anomaly
     @(d/transact conn [[:db/cas s12C :seat/status :available :held]])) ; agent B lost
   ;; => ":db.error/cas-failed Compare failed: :available :held"
+  ;;
+  ;; CAS is per-DATOM optimistic concurrency: no locks, no ceremony,
+  ;; the loser just retries. Its limit is scope — when the invariant
+  ;; spans several facts (seat AND booking AND payment), one datom's
+  ;; guard cannot see them all; that is when you escalate to a tx
+  ;; function (§4.3), which guards whole-db invariants.
 
   ;; nil as expected = "only if absent" — create-once semantics.
   ;; AD200 was seeded without a gate:
@@ -980,6 +1123,9 @@
   ;; The transactor runs ONE tx at a time. A tx function runs INSIDE
   ;; that serialization with the current db value — so check-then-write
   ;; here has NO race, ever, by construction.
+  ;; (The single-writer design the at-scale class called a "limit" is
+  ;;  precisely what buys this: one serialization point makes
+  ;;  read-check-write atomic with no locks and no SELECT FOR UPDATE.)
   ;;
   ;; :db/fn = the function is DATA, stored in the db, versioned and
   ;; deployed WITH your data. d/function compiles the map to a fn:
@@ -1083,6 +1229,11 @@
   ;;
   ;; Uses: dry-run migrations, "would this tx fn throw?", test suites
   ;; that never touch a transactor, branchy UIs (forked app state).
+  ;;
+  ;; d/with runs the SAME pipeline the transactor runs — expansion,
+  ;; cas, composites, preds — just on the peer, against a value, with
+  ;; nothing durable at the end. Immutability turns "a branch of the
+  ;; database" into a data structure instead of an environment.
 
 
   ;; ── 4.6 The tx-report-queue: reacting to writes ────────────────────
@@ -1107,6 +1258,11 @@
   ;;   (d/transact-async conn tx) — returns immediately; deref = ack.
   ;;   @(d/sync conn t)           — block until THIS peer has seen t
   ;;                                (read-your-writes across peers).
+  ;;
+  ;; Architecture note: the transactor already pushes committed novelty
+  ;; to every connected peer (that is how their caches stay current);
+  ;; the queue merely hands YOUR code that same stream. Do drain it —
+  ;; it buffers per peer, and an ignored queue is a slow memory leak.
 
 
   ;; ── 4.7 Excision: the one true eraser ──────────────────────────────
