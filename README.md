@@ -1,6 +1,6 @@
 # Datomic Classes
 
-Companion materials for five classes:
+Companion materials for six classes:
 
 - **One Database, Many Shapes** — a 2-hour, REPL-first class on domain
   modeling with Datomic datoms.
@@ -26,6 +26,22 @@ Companion materials for five classes:
   declarations generate the Datomic schema, Pathom resolvers, CRUD forms
   and reports — with REPL probes tracing every request through
   Read → Render → Edit/Add → Mutation → Transaction → DB.
+
+- **Advanced Datomic** — a 2-hour, REPL-only class (no deck): tuples in
+  all three flavors, schema edge cases (uniqueness lifecycle, alters,
+  ident renames, components, noHistory, attribute predicates and entity
+  specs), advanced queries (recursive rules, the `:with` trap, pull
+  tricks, multiple sources, query-stats) and advanced transactions
+  (reified txes, CAS, both kinds of transaction functions, `d/with`,
+  the tx-report queue, excision). Every claim verified live against
+  peer 1.0.7705 on `datomic:mem://` — no infra needed.
+
+The course closes with a **final project**: each student (solo or in a
+pair) models a domain of their own and demos it live in the REPL on the
+last class — schema, invariants, queries, time travel and a
+production-literacy narration, mapped A–F onto the six classes. Offered
+right after the Advanced class; checkpoint at the next class; demo day
+at the final one. See `datomic-final-project.md`.
 
 ## Files
 
@@ -118,6 +134,31 @@ Companion materials for five classes:
   REPL companion is `rad-app/src/main/rad_class/labs.clj` (§1–§8).
   Fulcro Inspect preloads are wired into the dev build.
   Uses `datomic:mem://` — no infra needed.
+
+### Advanced Datomic
+
+- `src/datomic_advanced/repl.clj` - the whole class: one linear REPL
+  session around a small airline domain ("Ada Air"), §0–§4. Evaluate
+  top to bottom; expected results (and expected *errors*, wrapped in
+  the `anomaly` helper) are inline. `(datomic-advanced.repl/fresh!)`
+  resets the in-memory db; re-run the SEED blocks after it.
+
+  ```sh
+  clj -M:repl
+  # (require 'datomic-advanced.repl)  ;; connects on load
+  ```
+
+### Final Project
+
+- `datomic-final-project.md` - the capstone brief handed out after the
+  Advanced class: timeline (study now → checkpoint next class → demo
+  day at the final class), ground rules, the A–F rubric mapping every
+  class onto the student's own domain, and the "starting tonight"
+  steps.
+- `src/course_project/skeleton.clj` - the starter file students copy to
+  `src/<name>/project.clj`: connection + `fresh!` + the `anomaly`
+  macro, the checkpoint one-pager as a fill-in header, and §1–§5
+  scaffolding with TODOs and per-section demo time budgets.
 
 ### Shared
 
